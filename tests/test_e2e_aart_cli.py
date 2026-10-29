@@ -50,7 +50,8 @@ events = tuple(
     )
     for n in range(int(sys.argv[2]))
 )
-print(outbox.record_events(events))
+# Fixed ids rather than the ones the outbox draws, so a second home sends the same ones again.
+print(outbox.record_action("action-1", lambda ids: events))
 """
 
 
