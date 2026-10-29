@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-PACKAGE = Path(__file__).resolve().parent.parent / "aart_telemetry_server"
+PACKAGE = Path(__file__).resolve().parent.parent / "aart_cli_telemetry_server"
 
 # mutmut rewrites the modules it mutates and adds its own imports to them; what is imported is a
 # property of the source, which every ordinary run checks.
@@ -45,7 +45,7 @@ def _imports(path: Path) -> set[str]:
             found.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             found.add(node.module.split(".")[0])
-    return found - {"aart_telemetry_server"}
+    return found - {"aart_cli_telemetry_server"}
 
 
 @pytest.mark.parametrize("layer", sorted(ALLOWED))

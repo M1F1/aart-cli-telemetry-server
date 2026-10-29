@@ -1,6 +1,6 @@
 # aart-cli telemetry API, version 1
 
-This document is the whole contract between aart-cli (the client) and aart-telemetry-server (the
+This document is the whole contract between aart-cli (the client) and aart-cli-telemetry-server (the
 server). The two repositories keep **identical copies** of it, `docs/telemetry-api-v1.md`, together
 with `contract/telemetry-api-v1.examples.json`; each repository's contract tests read both files,
 so a change that is not made in both is a failing test in one of them. Neither side imports the

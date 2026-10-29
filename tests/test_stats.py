@@ -9,8 +9,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from aart_telemetry_server.domain import stats
-from aart_telemetry_server.domain.events import (
+from aart_cli_telemetry_server.domain import stats
+from aart_cli_telemetry_server.domain.events import (
     Batch,
     Event,
     EventType,

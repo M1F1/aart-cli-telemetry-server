@@ -15,7 +15,7 @@ format-check:
 	$(RUN) ruff format --check .
 
 typecheck:
-	$(RUN) mypy aart_telemetry_server tests
+	$(RUN) mypy aart_cli_telemetry_server tests
 
 tach:
 	$(RUN) tach check
@@ -29,7 +29,7 @@ coverage:
 	$(RUN) coverage report
 
 # Advisory, not a gate, as in aart-cli. `paths_to_mutate` in pyproject.toml is the scope; ONLY
-# narrows the run to matching mutants: `make mutants ONLY='aart_telemetry_server.domain.stats*'`.
+# narrows the run to matching mutants: `make mutants ONLY='aart_cli_telemetry_server.domain.stats*'`.
 ONLY ?=
 mutants:
 	$(RUN) mutmut run $(ONLY)

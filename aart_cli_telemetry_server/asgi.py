@@ -1,4 +1,4 @@
-"""`uvicorn aart_telemetry_server.asgi:app`: the application on the configured database."""
+"""`uvicorn aart_cli_telemetry_server.asgi:app`: the application on the configured database."""
 
 from __future__ import annotations
 

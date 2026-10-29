@@ -10,13 +10,13 @@ from hypothesis import strategies as st
 from returns.io import IOFailure, IOResult, IOSuccess
 from returns.result import Failure, Success
 
-from aart_telemetry_server.adapters.memory import InMemoryEventRepository
-from aart_telemetry_server.application import use_cases
-from aart_telemetry_server.application.ports import StorageError
-from aart_telemetry_server.domain import stats
-from aart_telemetry_server.domain.contract import RefusalKind
-from aart_telemetry_server.domain.events import Event, StoredEvent
-from aart_telemetry_server.effects import perform
+from aart_cli_telemetry_server.adapters.memory import InMemoryEventRepository
+from aart_cli_telemetry_server.application import use_cases
+from aart_cli_telemetry_server.application.ports import StorageError
+from aart_cli_telemetry_server.domain import stats
+from aart_cli_telemetry_server.domain.contract import RefusalKind
+from aart_cli_telemetry_server.domain.events import Event, StoredEvent
+from aart_cli_telemetry_server.effects import perform
 
 from .strategies import CLIENTS, NOW, events, request
 

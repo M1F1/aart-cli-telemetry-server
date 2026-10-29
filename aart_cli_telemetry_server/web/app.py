@@ -16,21 +16,21 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from returns.io import IOResult, IOSuccess
 from returns.result import Failure, Success
 
-from aart_telemetry_server.application import use_cases
-from aart_telemetry_server.application.ports import Clock, EventRepository, StorageError
-from aart_telemetry_server.domain.contract import (
+from aart_cli_telemetry_server.application import use_cases
+from aart_cli_telemetry_server.application.ports import Clock, EventRepository, StorageError
+from aart_cli_telemetry_server.domain.contract import (
     MAX_BODY_BYTES,
     Refusal,
     RefusalKind,
     too_large,
 )
-from aart_telemetry_server.domain.events import stamp
-from aart_telemetry_server.domain.stats import MAX_DAYS, MAX_TOP
-from aart_telemetry_server.effects import perform
+from aart_cli_telemetry_server.domain.events import stamp
+from aart_cli_telemetry_server.domain.stats import MAX_DAYS, MAX_TOP
+from aart_cli_telemetry_server.effects import perform
 
 __all__ = ["create_app"]
 
-_STATIC = resources.files("aart_telemetry_server.web") / "static"
+_STATIC = resources.files("aart_cli_telemetry_server.web") / "static"
 _STATIC_FILES = {
     "dashboard.js": "text/javascript",
     "dashboard.css": "text/css",
@@ -96,7 +96,9 @@ async def _body(request: Request) -> bytes | None:
 
 
 def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
-    app = FastAPI(title="aart-telemetry-server", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        title="aart-cli-telemetry-server", docs_url=None, redoc_url=None, openapi_url=None
+    )
     days_query = Query(default=30, ge=1, le=MAX_DAYS)
 
     @app.post("/api/v1/events/batch")

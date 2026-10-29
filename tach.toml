@@ -12,44 +12,44 @@ exact = true
 forbid_circular_dependencies = true
 
 [[modules]]
-path = "aart_telemetry_server.domain"
+path = "aart_cli_telemetry_server.domain"
 depends_on = []
 
 [[modules]]
-path = "aart_telemetry_server.application"
-depends_on = ["aart_telemetry_server.domain"]
+path = "aart_cli_telemetry_server.application"
+depends_on = ["aart_cli_telemetry_server.domain"]
 
 [[modules]]
-path = "aart_telemetry_server.adapters"
-depends_on = ["aart_telemetry_server.application", "aart_telemetry_server.domain"]
+path = "aart_cli_telemetry_server.adapters"
+depends_on = ["aart_cli_telemetry_server.application", "aart_cli_telemetry_server.domain"]
 
 [[modules]]
-path = "aart_telemetry_server.web"
+path = "aart_cli_telemetry_server.web"
 depends_on = [
-    "aart_telemetry_server.application",
-    "aart_telemetry_server.domain",
-    "aart_telemetry_server.effects",
+    "aart_cli_telemetry_server.application",
+    "aart_cli_telemetry_server.domain",
+    "aart_cli_telemetry_server.effects",
 ]
 
 [[modules]]
-path = "aart_telemetry_server.effects"
+path = "aart_cli_telemetry_server.effects"
 depends_on = []
 
 [[modules]]
-path = "aart_telemetry_server.cli"
+path = "aart_cli_telemetry_server.cli"
 depends_on = [
-    "aart_telemetry_server.adapters",
-    "aart_telemetry_server.effects",
-    "aart_telemetry_server.web",
+    "aart_cli_telemetry_server.adapters",
+    "aart_cli_telemetry_server.effects",
+    "aart_cli_telemetry_server.web",
 ]
 
 [[modules]]
-path = "aart_telemetry_server.asgi"
+path = "aart_cli_telemetry_server.asgi"
 depends_on = [
-    "aart_telemetry_server.adapters",
-    "aart_telemetry_server.cli",
-    "aart_telemetry_server.effects",
-    "aart_telemetry_server.web",
+    "aart_cli_telemetry_server.adapters",
+    "aart_cli_telemetry_server.cli",
+    "aart_cli_telemetry_server.effects",
+    "aart_cli_telemetry_server.web",
 ]
 
 [external]

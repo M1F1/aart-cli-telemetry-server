@@ -9,9 +9,9 @@ from collections.abc import Sequence
 
 from returns.io import IOResult, IOSuccess
 
-from aart_telemetry_server.application.ports import StorageError
-from aart_telemetry_server.domain import stats
-from aart_telemetry_server.domain.events import StoredEvent
+from aart_cli_telemetry_server.application.ports import StorageError
+from aart_cli_telemetry_server.domain import stats
+from aart_cli_telemetry_server.domain.events import StoredEvent
 
 __all__ = ["InMemoryEventRepository"]
 

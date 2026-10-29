@@ -22,10 +22,10 @@ from pathlib import Path
 import pytest
 import uvicorn
 
-from aart_telemetry_server.adapters.sql import SqlEventRepository, open_repository, sqlite_url
-from aart_telemetry_server.domain.stats import window
-from aart_telemetry_server.effects import perform
-from aart_telemetry_server.web.app import create_app
+from aart_cli_telemetry_server.adapters.sql import SqlEventRepository, open_repository, sqlite_url
+from aart_cli_telemetry_server.domain.stats import window
+from aart_cli_telemetry_server.effects import perform
+from aart_cli_telemetry_server.web.app import create_app
 
 from .strategies import NOW
 

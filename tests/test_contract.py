@@ -15,14 +15,14 @@ from hypothesis import strategies as st
 from returns.pipeline import is_successful
 from returns.result import Failure, Result, Success
 
-from aart_telemetry_server.domain.contract import (
+from aart_cli_telemetry_server.domain.contract import (
     MAX_BODY_BYTES,
     MAX_EVENTS,
     Refusal,
     RefusalKind,
     read_batch,
 )
-from aart_telemetry_server.domain.events import SOURCES_FOR, Batch, Event, EventType, Source
+from aart_cli_telemetry_server.domain.events import SOURCES_FOR, Batch, Event, EventType, Source
 
 from .strategies import events, request
 

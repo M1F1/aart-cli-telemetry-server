@@ -1,11 +1,11 @@
-"""`aart-telemetry-server serve | backup`: the composition root.
+"""`aart-cli-telemetry-server serve | backup`: the composition root.
 
 This is where the shell is assembled: which database, which clock, which address. `serve` listens on
 loopback unless told it sits behind an authenticating proxy: version 1 of the API carries no client
 credential, so a server reachable from elsewhere without one in front would accept anybody's events
 and show anybody the dashboard.
 
-The database is `$AART_TELEMETRY_DATABASE_URL` when set -- any URL SQLAlchemy reads, such as a
+The database is `$AART_CLI_TELEMETRY_DATABASE_URL` when set -- any URL SQLAlchemy reads, such as a
 PostgreSQL one -- and otherwise SQLite in the data directory. A URL can carry a password, so it is
 never printed.
 """
@@ -34,8 +34,8 @@ __all__ = [
     "main",
 ]
 
-DATA_DIR_VARIABLE = "AART_TELEMETRY_DATA_DIR"
-DATABASE_URL_VARIABLE = "AART_TELEMETRY_DATABASE_URL"
+DATA_DIR_VARIABLE = "AART_CLI_TELEMETRY_DATA_DIR"
+DATABASE_URL_VARIABLE = "AART_CLI_TELEMETRY_DATABASE_URL"
 
 
 def default_data_dir() -> str:
@@ -43,7 +43,7 @@ def default_data_dir() -> str:
     if configured:
         return configured
     base = os.environ.get("XDG_DATA_HOME", "").strip() or str(Path.home() / ".local" / "share")
-    return str(Path(base) / "aart-telemetry-server")
+    return str(Path(base) / "aart-cli-telemetry-server")
 
 
 def database_url(data_dir: str | None = None) -> str:
@@ -65,7 +65,7 @@ def is_loopback(host: str) -> bool:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="aart-telemetry-server")
+    parser = argparse.ArgumentParser(prog="aart-cli-telemetry-server")
     commands = parser.add_subparsers(dest="command", required=True)
 
     serve = commands.add_parser("serve", help="run the server")

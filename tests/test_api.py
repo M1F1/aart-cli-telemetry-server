@@ -13,13 +13,13 @@ import pytest
 from fastapi.testclient import TestClient
 from returns.io import IOFailure, IOResult
 
-from aart_telemetry_server.adapters.memory import InMemoryEventRepository
-from aart_telemetry_server.adapters.sql import SqlEventRepository, open_repository, sqlite_url
-from aart_telemetry_server.application.ports import StorageError
-from aart_telemetry_server.domain.contract import MAX_BODY_BYTES
-from aart_telemetry_server.domain.events import StoredEvent
-from aart_telemetry_server.effects import perform
-from aart_telemetry_server.web.app import create_app
+from aart_cli_telemetry_server.adapters.memory import InMemoryEventRepository
+from aart_cli_telemetry_server.adapters.sql import SqlEventRepository, open_repository, sqlite_url
+from aart_cli_telemetry_server.application.ports import StorageError
+from aart_cli_telemetry_server.domain.contract import MAX_BODY_BYTES
+from aart_cli_telemetry_server.domain.events import StoredEvent
+from aart_cli_telemetry_server.effects import perform
+from aart_cli_telemetry_server.web.app import create_app
 
 from .strategies import NOW
 

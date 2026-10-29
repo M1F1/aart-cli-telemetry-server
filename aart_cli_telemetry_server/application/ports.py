@@ -9,8 +9,8 @@ from typing import Protocol
 
 from returns.io import IOResult
 
-from aart_telemetry_server.domain.events import StoredEvent
-from aart_telemetry_server.domain.stats import (
+from aart_cli_telemetry_server.domain.events import StoredEvent
+from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
     DailyCount,
     SourceUsage,

@@ -14,7 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 CONTRACT_SHA256 = {
-    "docs/telemetry-api-v1.md": "c06bc119e642b3969fa8444a301ee28bd704058984d681d9896bb0009d401763",
+    "docs/telemetry-api-v1.md": "22c1307cbf9ef97cb6cbe1560804363e74c986ef55f21ad3a1e1c5197eb8ffeb",
     "contract/telemetry-api-v1.examples.json": (
         "af9022f4889ffca325353416c088608925f327feac0176b1f21cedf6374004e9"
     ),

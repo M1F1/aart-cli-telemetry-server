@@ -8,7 +8,7 @@ from typing import Any
 
 from hypothesis import strategies as st
 
-from aart_telemetry_server.domain.events import (
+from aart_cli_telemetry_server.domain.events import (
     SOURCES_FOR,
     Event,
     EventType,

@@ -1,7 +1,8 @@
 """Every `EventRepository` keeps an id once and counts as `domain.stats` defines.
 
 The same tests run against each repository: in memory, SQLite, and PostgreSQL when
-`AART_TELEMETRY_TEST_POSTGRES_URL` names a database this suite may empty (otherwise it is skipped).
+`AART_CLI_TELEMETRY_TEST_POSTGRES_URL` names a database this suite may empty (otherwise it is
+skipped).
 The aggregates are compared with the pure definitions over generated histories, so a repository
 that groups, filters or orders differently from the definitions fails here, not on a dashboard.
 """
@@ -22,22 +23,22 @@ from hypothesis import strategies as st
 from returns.io import IOResult, IOSuccess
 from sqlalchemy import delete
 
-from aart_telemetry_server.adapters.memory import InMemoryEventRepository
-from aart_telemetry_server.adapters.sql import (
+from aart_cli_telemetry_server.adapters.memory import InMemoryEventRepository
+from aart_cli_telemetry_server.adapters.sql import (
     SCHEMA_VERSION,
     SqlEventRepository,
     events,
     open_repository,
     sqlite_url,
 )
-from aart_telemetry_server.application.ports import EventRepository, StorageError
-from aart_telemetry_server.domain import stats
-from aart_telemetry_server.domain.events import StoredEvent
-from aart_telemetry_server.effects import perform
+from aart_cli_telemetry_server.application.ports import EventRepository, StorageError
+from aart_cli_telemetry_server.domain import stats
+from aart_cli_telemetry_server.domain.events import StoredEvent
+from aart_cli_telemetry_server.effects import perform
 
 from .strategies import NOW, histories, numbered
 
-POSTGRES = os.environ.get("AART_TELEMETRY_TEST_POSTGRES_URL", "").strip()
+POSTGRES = os.environ.get("AART_CLI_TELEMETRY_TEST_POSTGRES_URL", "").strip()
 
 
 _T = TypeVar("_T")

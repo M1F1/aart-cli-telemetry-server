@@ -1,4 +1,4 @@
-# aart-telemetry-server
+# aart-cli-telemetry-server
 
 Receives artifact telemetry from [aart-cli](https://github.com/M1F1/aart-cli), stores it in a
 database -- SQLite by default, PostgreSQL by URL -- and shows it on a dashboard in the browser: which artifacts are used, how often, by how many
@@ -9,10 +9,10 @@ installations, and how installs, updates and removals change over time.
   repositories keep identical copies and test against them. This server never imports aart-cli.
 - **Storage** is behind a port. A batch is stored in one transaction and acknowledged only after it
   committed; an `event_id` already stored is acknowledged and never counted again. The default is
-  one SQLite database in WAL mode, owner-only (0600); `AART_TELEMETRY_DATABASE_URL` selects any
+  one SQLite database in WAL mode, owner-only (0600); `AART_CLI_TELEMETRY_DATABASE_URL` selects any
   database SQLAlchemy reads, and the same repository runs on PostgreSQL.
 - **The dashboard** loads nothing from outside the server. Chart.js 4.4.1 (MIT) is vendored in
-  `aart_telemetry_server/web/static/`, with its licence beside it.
+  `aart_cli_telemetry_server/web/static/`, with its licence beside it.
 
 ## How it is built
 
@@ -38,14 +38,14 @@ Needs Python 3.11 or newer and [Poetry](https://python-poetry.org/).
 
 ```bash
 poetry install
-poetry run aart-telemetry-server serve --port 8000
+poetry run aart-cli-telemetry-server serve --port 8000
 ```
 
 Then open <http://127.0.0.1:8000/dashboard>.
 
-The database is SQLite outside the source tree: in `$AART_TELEMETRY_DATA_DIR` when it is set,
-else `$XDG_DATA_HOME/aart-telemetry-server`, else `~/.local/share/aart-telemetry-server`.
-`$AART_TELEMETRY_DATABASE_URL` replaces it with any database URL, such as
+The database is SQLite outside the source tree: in `$AART_CLI_TELEMETRY_DATA_DIR` when it is set,
+else `$XDG_DATA_HOME/aart-cli-telemetry-server`, else `~/.local/share/aart-cli-telemetry-server`.
+`$AART_CLI_TELEMETRY_DATABASE_URL` replaces it with any database URL, such as
 `postgresql+psycopg://telemetry@db/telemetry` (install the `postgresql` extra for the driver); a
 URL can carry a password, so it is never printed. `--data-dir` overrides both with SQLite there.
 The schema is created in an empty database on first start; a database at another schema version,
@@ -54,7 +54,7 @@ or not created by this server, is refused and left as it is.
 The application can also be served by any ASGI server, reading the same variables:
 
 ```bash
-AART_TELEMETRY_DATA_DIR=/tmp/aart-telemetry poetry run uvicorn aart_telemetry_server.asgi:app --host 127.0.0.1 --port 8000
+AART_CLI_TELEMETRY_DATA_DIR=/tmp/aart-cli-telemetry poetry run uvicorn aart_cli_telemetry_server.asgi:app --host 127.0.0.1 --port 8000
 ```
 
 ## Point aart-cli at it
@@ -78,7 +78,7 @@ Internet without one.
 ## Backup
 
 ```bash
-poetry run aart-telemetry-server backup /path/to/copy.sqlite3
+poetry run aart-cli-telemetry-server backup /path/to/copy.sqlite3
 ```
 
 takes a consistent copy with SQLite's online backup while the server runs. For PostgreSQL use
@@ -112,7 +112,7 @@ killed 379 of 399; the 20 left are equivalent: the wording of errors no reason r
 no contract error reaches.
 
 `tests/test_repository_contract.py` also runs against PostgreSQL when
-`AART_TELEMETRY_TEST_POSTGRES_URL` names a database it may empty. Create that database with a
+`AART_CLI_TELEMETRY_TEST_POSTGRES_URL` names a database it may empty. Create that database with a
 linguistic collation (CI uses ICU `en-US`): under the byte-order `C` collation some images default
 to, the test that holds artifact ids in code-point order passes even without the explicit `COLLATE
 "C"`. `tests/test_e2e_aart_cli.py` runs a real aart-cli against a real server when `AART_CLI_PYTHON`
@@ -126,4 +126,4 @@ scheduled backups and a tested restore) is the next stage and is not in this rep
 ## Licence
 
 MIT. Chart.js is MIT, © Chart.js Contributors; see
-`aart_telemetry_server/web/static/chart.js.LICENSE.md`.
+`aart_cli_telemetry_server/web/static/chart.js.LICENSE.md`.

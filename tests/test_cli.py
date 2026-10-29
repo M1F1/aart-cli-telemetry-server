@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from aart_telemetry_server.cli import (
+from aart_cli_telemetry_server.cli import (
     DATA_DIR_VARIABLE,
     DATABASE_URL_VARIABLE,
     database_url,
@@ -42,8 +42,8 @@ def test_the_database_is_the_flag_then_the_url_then_the_data_directory(
     monkeypatch.delenv(DATABASE_URL_VARIABLE, raising=False)
     monkeypatch.delenv(DATA_DIR_VARIABLE, raising=False)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    assert default_data_dir() == str(tmp_path / "xdg" / "aart-telemetry-server")
-    assert database_url() == f"sqlite:///{tmp_path}/xdg/aart-telemetry-server/telemetry.sqlite3"
+    assert default_data_dir() == str(tmp_path / "xdg" / "aart-cli-telemetry-server")
+    assert database_url() == f"sqlite:///{tmp_path}/xdg/aart-cli-telemetry-server/telemetry.sqlite3"
     monkeypatch.setenv(DATA_DIR_VARIABLE, str(tmp_path / "data"))
     assert database_url() == f"sqlite:///{tmp_path}/data/telemetry.sqlite3"
     monkeypatch.setenv(DATABASE_URL_VARIABLE, "postgresql://telemetry@db/telemetry")
@@ -72,7 +72,7 @@ def test_serve_runs_the_app_on_the_database_it_opened(
 ) -> None:
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "aart_telemetry_server.cli.uvicorn.run",
+        "aart_cli_telemetry_server.cli.uvicorn.run",
         lambda app, **options: calls.append({"app": type(app).__name__, **options}),
     )
     assert main(["serve", "--data-dir", str(tmp_path), "--port", "8123"]) == 0
@@ -92,14 +92,14 @@ def test_the_asgi_entry_point_opens_the_configured_database_or_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(DATABASE_URL_VARIABLE, f"sqlite:///{tmp_path}/asgi/telemetry.sqlite3")
-    sys.modules.pop("aart_telemetry_server.asgi", None)
-    module = importlib.import_module("aart_telemetry_server.asgi")
+    sys.modules.pop("aart_cli_telemetry_server.asgi", None)
+    module = importlib.import_module("aart_cli_telemetry_server.asgi")
     assert type(module.app).__name__ == "FastAPI"
 
     (tmp_path / "broken").mkdir()
     (tmp_path / "broken" / "telemetry.sqlite3").write_bytes(b"x" * 64)
     monkeypatch.setenv(DATABASE_URL_VARIABLE, f"sqlite:///{tmp_path}/broken/telemetry.sqlite3")
-    sys.modules.pop("aart_telemetry_server.asgi", None)
+    sys.modules.pop("aart_cli_telemetry_server.asgi", None)
     with pytest.raises(RuntimeError, match="cannot be used"):
-        importlib.import_module("aart_telemetry_server.asgi")
-    sys.modules.pop("aart_telemetry_server.asgi", None)
+        importlib.import_module("aart_cli_telemetry_server.asgi")
+    sys.modules.pop("aart_cli_telemetry_server.asgi", None)

@@ -3,7 +3,7 @@ requires = ["poetry-core==2.4.0"]
 build-backend = "poetry.core.masonry.api"
 
 [project]
-name = "aart-telemetry-server"
+name = "aart-cli-telemetry-server"
 version = "0.1.0"
 description = "Receives aart-cli's artifact telemetry, stores it in SQLite and shows it on a dashboard."
 readme = "README.md"
@@ -19,18 +19,18 @@ dependencies = [
 ]
 
 [project.scripts]
-aart-telemetry-server = "aart_telemetry_server.cli:main"
+aart-cli-telemetry-server = "aart_cli_telemetry_server.cli:main"
 
 [project.urls]
-Repository = "https://github.com/M1F1/aart-telemetry-server"
+Repository = "https://github.com/M1F1/aart-cli-telemetry-server"
 
 [project.optional-dependencies]
 postgresql = ["psycopg[binary] (>=3.2,<4)"]
 
 [tool.poetry]
-packages = [{ include = "aart_telemetry_server" }]
+packages = [{ include = "aart_cli_telemetry_server" }]
 include = [
-    { path = "aart_telemetry_server/web/static/**/*", format = ["sdist", "wheel"] },
+    { path = "aart_cli_telemetry_server/web/static/**/*", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.group.dev.dependencies]
@@ -66,7 +66,7 @@ warn_required_dynamic_aliases = true
 
 [tool.coverage.run]
 branch = true
-source = ["aart_telemetry_server"]
+source = ["aart_cli_telemetry_server"]
 
 [tool.coverage.report]
 fail_under = 95
@@ -75,8 +75,8 @@ skip_covered = true
 exclude_also = ["if __name__ == .__main__.:", "raise AssertionError"]
 
 [tool.mutmut]
-source_paths = ["aart_telemetry_server/domain/", "aart_telemetry_server/application/"]
-also_copy = ["aart_telemetry_server/", "contract/", "docs/"]
+source_paths = ["aart_cli_telemetry_server/domain/", "aart_cli_telemetry_server/application/"]
+also_copy = ["aart_cli_telemetry_server/", "contract/", "docs/"]
 pytest_add_cli_args_test_selection = ["tests/test_contract.py", "tests/test_stats.py", "tests/test_use_cases.py"]
 # tach's pytest plugin leaves threads behind that deadlock mutmut's forked workers on macOS: every
 # mutant then times out. The architecture is checked by `tach check`, not by this run.

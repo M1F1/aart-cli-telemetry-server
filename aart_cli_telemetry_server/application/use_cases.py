@@ -8,9 +8,9 @@ from returns.io import IOResult
 from returns.pipeline import flow
 from returns.pointfree import bind
 
-from aart_telemetry_server.domain.contract import Refusal, read_batch
-from aart_telemetry_server.domain.events import Batch, acknowledged, stored_events
-from aart_telemetry_server.domain.stats import (
+from aart_cli_telemetry_server.domain.contract import Refusal, read_batch
+from aart_cli_telemetry_server.domain.events import Batch, acknowledged, stored_events
+from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
     DailyCount,
     SourceUsage,

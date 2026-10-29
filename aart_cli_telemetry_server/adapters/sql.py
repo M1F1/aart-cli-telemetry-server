@@ -44,9 +44,9 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.types import TypeDecorator
 
-from aart_telemetry_server.application.ports import StorageError
-from aart_telemetry_server.domain.events import Event, EventType, Source, StoredEvent
-from aart_telemetry_server.domain.stats import (
+from aart_cli_telemetry_server.application.ports import StorageError
+from aart_cli_telemetry_server.domain.events import Event, EventType, Source, StoredEvent
+from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
     DailyCount,
     SourceUsage,
@@ -373,7 +373,7 @@ def _prepare(engine: Engine) -> None:
             connection.execute(schema_info.insert(), {"id": 1, "version": SCHEMA_VERSION})
         return
     if "schema_info" not in tables:
-        raise _Refused("this database was not created by aart-telemetry-server")
+        raise _Refused("this database was not created by aart-cli-telemetry-server")
     with engine.connect() as connection:
         version = connection.execute(select(schema_info.c.version)).scalar()
     if version != SCHEMA_VERSION:
