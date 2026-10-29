@@ -1,0 +1,58 @@
+# Layers as data: a functional core, an application written against ports, and the shell around it.
+#
+# `domain` depends on nothing of this package; `application` only on `domain`; the adapters
+# (database) and the web layer implement or call `application` and never each other. `effects` is
+# the one place a result leaves IO. `cli` and `asgi` are the composition roots, the only modules
+# that see every layer. A new edge is a diff here that a reviewer reads, and `make tach` refuses one that is not. Which third-party libraries
+# each layer may import is held by tests/test_architecture.py.
+
+exclude = ["**/__pycache__", "tests", "build", "dist", ".venv"]
+source_roots = ["."]
+exact = true
+forbid_circular_dependencies = true
+
+[[modules]]
+path = "aart_telemetry_server.domain"
+depends_on = []
+
+[[modules]]
+path = "aart_telemetry_server.application"
+depends_on = ["aart_telemetry_server.domain"]
+
+[[modules]]
+path = "aart_telemetry_server.adapters"
+depends_on = ["aart_telemetry_server.application", "aart_telemetry_server.domain"]
+
+[[modules]]
+path = "aart_telemetry_server.web"
+depends_on = [
+    "aart_telemetry_server.application",
+    "aart_telemetry_server.domain",
+    "aart_telemetry_server.effects",
+]
+
+[[modules]]
+path = "aart_telemetry_server.effects"
+depends_on = []
+
+[[modules]]
+path = "aart_telemetry_server.cli"
+depends_on = [
+    "aart_telemetry_server.adapters",
+    "aart_telemetry_server.effects",
+    "aart_telemetry_server.web",
+]
+
+[[modules]]
+path = "aart_telemetry_server.asgi"
+depends_on = [
+    "aart_telemetry_server.adapters",
+    "aart_telemetry_server.cli",
+    "aart_telemetry_server.effects",
+    "aart_telemetry_server.web",
+]
+
+[external]
+# pydantic's own core, at the exact version pydantic pins; declaring it too would only let the two
+# drift. Its error types are what a validator raises.
+exclude = ["pydantic_core"]

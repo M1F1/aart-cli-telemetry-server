@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pipx install poetry==2.4.1
+      - run: poetry install --with dev --all-extras
+      - run: make quality
+
+  postgresql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: telemetry
+          POSTGRES_PASSWORD: telemetry
+          POSTGRES_DB: telemetry
+          POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=en-US
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U telemetry"
+          --health-interval 2s --health-timeout 5s --health-retries 20
+    env:
+      AART_TELEMETRY_TEST_POSTGRES_URL: postgresql+psycopg://telemetry:telemetry@127.0.0.1:5432/telemetry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pipx install poetry==2.4.1
+      - run: poetry install --with dev --all-extras
+      - run: poetry run pytest -q tests/test_repository_contract.py

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artifact Telemetry</title>
+<link rel="stylesheet" href="/static/dashboard.css">
+<script src="/static/chart.umd.min.js" defer></script>
+<script src="/static/dashboard.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>Artifact telemetry</h1>
+  <label>Period
+    <select id="days">
+      <option value="7">7 days</option>
+      <option value="30" selected>30 days</option>
+      <option value="90">90 days</option>
+      <option value="365">365 days</option>
+    </select>
+  </label>
+  <span id="updated" class="muted"></span>
+</header>
+<main>
+  <section class="tiles" id="tiles"></section>
+  <section class="panel">
+    <h2>Uses per day</h2>
+    <div class="chart"><canvas id="daily"></canvas></div>
+  </section>
+  <section class="panel">
+    <h2>Installs, updates and removals per day</h2>
+    <p class="muted">An install is not a use; the two are counted apart.</p>
+    <div class="chart"><canvas id="lifecycle"></canvas></div>
+  </section>
+  <section class="panel">
+    <h2>Most used artifacts</h2>
+    <table>
+      <thead><tr><th>Artifact</th><th>Kind</th><th class="number">Uses</th><th class="number">Installations using it</th><th class="number">Installs</th><th>Last used (UTC)</th></tr></thead>
+      <tbody id="top"></tbody>
+    </table>
+  </section>
+  <section class="panel">
+    <h2>Uses by harness and kind</h2>
+    <div class="chart short"><canvas id="sources"></canvas></div>
+  </section>
+</main>
+<footer class="muted">Counts come from aart-cli installations that turned telemetry on. An installation is a pseudonymous id, not a person.</footer>
+</body>
+</html>

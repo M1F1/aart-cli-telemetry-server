@@ -1,0 +1,146 @@
+{
+  "valid": [
+    {
+      "name": "one use from Claude Code",
+      "request": {
+        "schema_version": 1,
+        "client_id": "0b6f4d1e-8f8a-4a43-9a52-2f0f5d0f6a11",
+        "client_version": "0.22.0",
+        "events": [
+          {
+            "event_id": "7515ec68-1e98-46ca-bd90-9f6a70c84d11",
+            "occurred_at": "2026-10-29T18:15:00Z",
+            "event_type": "artifact.used",
+            "source": "claude_hook",
+            "artifact_id": "release-notes",
+            "artifact_type": "skill",
+            "artifact_version": "1.2.0"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an install and a removal from aart-cli, and a use from opencode without a version",
+      "request": {
+        "schema_version": 1,
+        "client_id": "0b6f4d1e-8f8a-4a43-9a52-2f0f5d0f6a11",
+        "client_version": "0.22.0+local",
+        "events": [
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0001",
+            "occurred_at": "2026-10-29T18:00:00.123456Z",
+            "event_type": "artifact.installed",
+            "source": "aart_cli",
+            "artifact_id": "jira-mcp",
+            "artifact_type": "mcp",
+            "artifact_version": "2.0.1"
+          },
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0002",
+            "occurred_at": "2026-10-29T18:05:00Z",
+            "event_type": "artifact.used",
+            "source": "opencode_plugin",
+            "artifact_id": "jira-mcp",
+            "artifact_type": "mcp"
+          },
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0003",
+            "occurred_at": "2026-10-29T18:06:00Z",
+            "event_type": "artifact.removed",
+            "source": "aart_cli",
+            "artifact_id": "jira-mcp",
+            "artifact_type": "mcp",
+            "artifact_version": "2.0.1"
+          }
+        ]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "a field the contract does not have",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000001",
+        "occurred_at": "2026-10-29T18:15:00Z",
+        "event_type": "artifact.used",
+        "source": "claude_hook",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill",
+        "project": "/Users/someone/work"
+      }
+    },
+    {
+      "name": "a use from aart-cli",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000002",
+        "occurred_at": "2026-10-29T18:15:00Z",
+        "event_type": "artifact.used",
+        "source": "aart_cli",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill"
+      }
+    },
+    {
+      "name": "an install from a hook",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000003",
+        "occurred_at": "2026-10-29T18:15:00Z",
+        "event_type": "artifact.installed",
+        "source": "opencode_plugin",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill"
+      }
+    },
+    {
+      "name": "a moment with an offset rather than Z",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000004",
+        "occurred_at": "2026-10-29T18:15:00+00:00",
+        "event_type": "artifact.used",
+        "source": "claude_hook",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill"
+      }
+    },
+    {
+      "name": "an uppercase event id",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9A9A9A9A-0000-4000-8000-000000000005",
+        "occurred_at": "2026-10-29T18:15:00Z",
+        "event_type": "artifact.used",
+        "source": "claude_hook",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill"
+      }
+    },
+    {
+      "name": "a name with a path in it",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000006",
+        "occurred_at": "2026-10-29T18:15:00Z",
+        "event_type": "artifact.used",
+        "source": "claude_hook",
+        "artifact_id": "/Users/someone/skill",
+        "artifact_type": "skill"
+      }
+    },
+    {
+      "name": "an unknown event type",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000007",
+        "occurred_at": "2026-10-29T18:15:00Z",
+        "event_type": "artifact.viewed",
+        "source": "aart_cli",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill"
+      }
+    }
+  ]
+}
