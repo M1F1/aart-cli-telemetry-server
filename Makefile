@@ -1,4 +1,4 @@
-.PHONY: quality lint format format-check typecheck tach test coverage mutants
+.PHONY: quality lint format format-check typecheck tach test coverage mutants image image-smoke
 
 POETRY ?= poetry
 RUN = $(POETRY) run
@@ -15,7 +15,7 @@ format-check:
 	$(RUN) ruff format --check .
 
 typecheck:
-	$(RUN) mypy aart_cli_telemetry_server tests
+	$(RUN) mypy aart_cli_telemetry_server tests scripts
 
 tach:
 	$(RUN) tach check
@@ -34,3 +34,11 @@ ONLY ?=
 mutants:
 	$(RUN) mutmut run $(ONLY)
 	$(RUN) mutmut results
+
+# The container image and its check, which needs Docker: not part of `quality`, CI runs it apart.
+IMAGE ?= aart-cli-telemetry-server:dev
+image:
+	docker build -t $(IMAGE) .
+
+image-smoke: image
+	$(RUN) python scripts/image_smoke.py $(IMAGE)
