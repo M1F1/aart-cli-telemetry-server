@@ -56,19 +56,23 @@ Every event:
 |---|---|
 | `event_id` | A lowercase UUID, drawn by aart-cli when the event is recorded. The server's idempotency key. |
 | `occurred_at` | UTC, `YYYY-MM-DDTHH:MM:SS` with an optional fraction of 1–6 digits, then `Z`. |
-| `event_type` | `artifact.installed`, `artifact.updated`, `artifact.removed` or `artifact.used`. |
-| `source` | `aart_cli` for the first three; `claude_hook` or `opencode_plugin` for `artifact.used`. |
+| `event_type` | `artifact.installed`, `artifact.updated`, `artifact.removed`, `artifact.used` or `unmanaged.used`. |
+| `source` | `aart_cli` for the first three; `claude_hook` or `opencode_plugin` for `artifact.used` and `unmanaged.used`. |
 | `artifact_id` | The artifact's name, 1–200 characters of `[0-9A-Za-z._@:+-]`. |
 | `artifact_type` | The artifact's kind, 1–64 characters of `[a-z0-9-]` (`skill`, `mcp`, `agent`, ...). |
-| `artifact_version` | Optional. 1–64 characters of `[0-9A-Za-z.+-]`. |
+| `artifact_version` | Optional. 1–64 characters of `[0-9A-Za-z.+-]`. Never present in `unmanaged.used`. |
 
 No other field is accepted, in the request or in an event. In particular an event never carries a
 prompt, what a tool was called with, a file's content, a path, a project, a Registry address, a
 user name, a host name or any credential.
 
-`artifact.used` is sent only for an artifact aart-cli installed and could name with certainty: a use
-that cannot be attributed to an installed artifact is never sent. Installation and use are separate
-event types and the server keeps them apart.
+`artifact.used` is sent only for an artifact aart-cli installed and could name with certainty, and
+names that installation. `unmanaged.used` is a use of a skill or MCP that no artifact aart-cli
+installed answers to: `artifact_id` is the name the harness used (a skill's name, an MCP server's
+for Claude Code, the whole tool name for opencode) and `artifact_type` is `skill` or `mcp`. aart-cli
+sends it only while the person, or without their choice the build, says such uses are sent. A use
+aart-cli can attribute is never sent as `unmanaged.used`. Installation, use of an installed artifact
+and use of anything else are separate event types and the server keeps them apart.
 
 ## Responses
 
@@ -98,5 +102,8 @@ These are the server's own and not part of what aart-cli relies on.
 
 ## Versioning
 
-A change that a version-1 server or client would reject or misread is version 2: a new path
-(`/api/v2/...`) and a new `schema_version`. Version 1 stays as it is.
+A change that a version-1 server or client would misread is version 2: a new path
+(`/api/v2/...`) and a new `schema_version`. A new event type is added to version 1: a server that
+does not know it answers `422` naming those events, which the client marks rejected while the
+rest of the batch is stored, so nothing is misread and only the new type is lost. `unmanaged.used`
+was added this way.

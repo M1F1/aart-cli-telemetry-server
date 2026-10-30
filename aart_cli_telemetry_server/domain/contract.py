@@ -75,7 +75,11 @@ class _EventDocument(BaseModel):
     event_id: Uuid
     occurred_at: Moment
     event_type: Literal[
-        "artifact.installed", "artifact.updated", "artifact.removed", "artifact.used"
+        "artifact.installed",
+        "artifact.updated",
+        "artifact.removed",
+        "artifact.used",
+        "unmanaged.used",
     ]
     source: Literal["aart_cli", "claude_hook", "opencode_plugin"]
     artifact_id: Annotated[str, StringConstraints(pattern=_NAME)]
@@ -87,6 +91,10 @@ class _EventDocument(BaseModel):
         if Source(self.source) not in SOURCES_FOR[EventType(self.event_type)]:
             raise PydanticCustomError(
                 "source_event_type", "this source cannot report this event_type"
+            )
+        if self.event_type == EventType.UNMANAGED_USED.value and self.artifact_version is not None:
+            raise PydanticCustomError(
+                "unmanaged_version", "an unmanaged.used event has no artifact_version"
             )
         return self
 
@@ -181,6 +189,8 @@ def _event_reason(error: ErrorDetails) -> str:
         return f"missing {field}"
     if kind == "source_event_type":
         return "this source cannot report this event_type"
+    if kind == "unmanaged_version":
+        return "an unmanaged.used event has no artifact_version"
     return _EVENT_REASONS.get(field, "an event does not follow the contract")
 
 

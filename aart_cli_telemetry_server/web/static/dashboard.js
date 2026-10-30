@@ -25,6 +25,7 @@ function tiles(summary) {
     ["Installs", summary.installs],
     ["Updates", summary.updates],
     ["Removals", summary.removals],
+    ["Uses of tools aart-cli did not install", summary.unmanaged_uses],
   ];
   const root = document.getElementById("tiles");
   root.replaceChildren(
@@ -60,10 +61,11 @@ function draw(id, type, labels, datasets, options = {}) {
 
 async function refresh() {
   const days = document.getElementById("days").value;
-  const [summary, daily, top, sources] = await Promise.all([
+  const [summary, daily, top, unmanaged, sources] = await Promise.all([
     stats("summary", days),
     stats("daily", days),
     stats("top-artifacts", days),
+    stats("top-unmanaged", days),
     stats("by-source", days),
   ]);
   tiles(summary);
@@ -94,6 +96,19 @@ async function refresh() {
         cell(row.uses, "number"),
         cell(row.clients, "number"),
         cell(row.installs, "number"),
+        cell(row.last_used)
+      );
+      return tr;
+    })
+  );
+  document.getElementById("unmanaged").replaceChildren(
+    ...unmanaged.tools.map((row) => {
+      const tr = document.createElement("tr");
+      tr.append(
+        cell(row.artifact_id),
+        cell(row.artifact_type),
+        cell(row.uses, "number"),
+        cell(row.clients, "number"),
         cell(row.last_used)
       );
       return tr;

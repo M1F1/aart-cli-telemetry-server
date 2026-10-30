@@ -130,6 +130,7 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
                 "active_clients": found.active_clients,
                 "using_clients": found.using_clients,
                 "used_artifacts": found.used_artifacts,
+                "unmanaged_uses": found.unmanaged_uses,
             },
         )
 
@@ -148,6 +149,27 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
                         "uses": item.uses,
                         "clients": item.clients,
                         "installs": item.installs,
+                        "last_used": stamp(item.last_used),
+                    }
+                    for item in found
+                ],
+            },
+        )
+
+    @app.get("/api/v1/stats/top-unmanaged")
+    def top_unmanaged(
+        days: int = days_query, limit: int = Query(default=20, ge=1, le=MAX_TOP)
+    ) -> Response:
+        return _answer(
+            use_cases.top_unmanaged(days, limit, repository, clock),
+            lambda found: {
+                "days": days,
+                "tools": [
+                    {
+                        "artifact_type": item.artifact_type,
+                        "artifact_id": item.artifact_id,
+                        "uses": item.uses,
+                        "clients": item.clients,
                         "last_used": stamp(item.last_used),
                     }
                     for item in found

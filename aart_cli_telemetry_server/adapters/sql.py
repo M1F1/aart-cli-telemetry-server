@@ -51,6 +51,7 @@ from aart_cli_telemetry_server.domain.stats import (
     DailyCount,
     SourceUsage,
     Summary,
+    UnmanagedUsage,
     Window,
 )
 
@@ -212,6 +213,7 @@ class SqlEventRepository:
             func.count(
                 distinct(case((used, events.c.artifact_type + "\x1f" + events.c.artifact_id)))
             ),
+            _count(EventType.UNMANAGED_USED),
         ).where(events.c.occurred_at >= period.since)
         return self._rows(statement).map(lambda rows: Summary(*(int(n or 0) for n in rows[0])))
 
@@ -270,6 +272,35 @@ class SqlEventRepository:
             lambda rows: tuple(
                 ArtifactUsage(kind, name, int(n), int(clients), int(installs), _aware(last))
                 for kind, name, n, clients, installs, last in rows
+            )
+        )
+
+    def top_unmanaged(
+        self, period: Window, limit: int
+    ) -> IOResult[tuple[UnmanagedUsage, ...], StorageError]:
+        uses = func.count().label("uses")
+        statement = (
+            select(
+                events.c.artifact_type,
+                events.c.artifact_id,
+                uses,
+                func.count(distinct(events.c.client_id)),
+                func.max(events.c.occurred_at),
+            )
+            .where(events.c.occurred_at >= period.since)
+            .where(events.c.event_type == EventType.UNMANAGED_USED.value)
+            .group_by(events.c.artifact_type, events.c.artifact_id)
+            .order_by(
+                uses.desc(),
+                self._by_name(events.c.artifact_id),
+                self._by_name(events.c.artifact_type),
+            )
+            .limit(limit)
+        )
+        return self._rows(statement).map(
+            lambda rows: tuple(
+                UnmanagedUsage(kind, name, int(n), int(clients), _aware(last))
+                for kind, name, n, clients, last in rows
             )
         )
 

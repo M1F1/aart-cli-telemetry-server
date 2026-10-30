@@ -25,6 +25,8 @@ class EventType(StrEnum):
     UPDATED = "artifact.updated"
     REMOVED = "artifact.removed"
     USED = "artifact.used"
+    #: A use of a skill or MCP no artifact aart-cli installed answers to, by the harness's name.
+    UNMANAGED_USED = "unmanaged.used"
 
 
 class Source(StrEnum):
@@ -39,6 +41,7 @@ SOURCES_FOR: Mapping[EventType, frozenset[Source]] = {
     EventType.UPDATED: frozenset({Source.AART_CLI}),
     EventType.REMOVED: frozenset({Source.AART_CLI}),
     EventType.USED: frozenset({Source.CLAUDE_HOOK, Source.OPENCODE_PLUGIN}),
+    EventType.UNMANAGED_USED: frozenset({Source.CLAUDE_HOOK, Source.OPENCODE_PLUGIN}),
 }
 
 
@@ -63,6 +66,8 @@ class Event:
         _utc(self.occurred_at)
         if self.source not in SOURCES_FOR[self.event_type]:
             raise ValueError("this source cannot report this event type")
+        if self.event_type is EventType.UNMANAGED_USED and self.artifact_version is not None:
+            raise ValueError("an unmanaged use has no version")
 
 
 @dataclass(frozen=True, slots=True)

@@ -189,6 +189,7 @@ def test_every_required_field_is_required(field: str) -> None:
 def test_a_source_reports_only_its_own_event_types(event_type: EventType, source: Source) -> None:
     document = _valid()
     document["events"][0].update(event_type=event_type.value, source=source.value)
+    del document["events"][0]["artifact_version"]
     assert is_successful(_read(document)) == (source in SOURCES_FOR[event_type])
 
 
@@ -262,6 +263,19 @@ def test_a_refused_event_says_which_field_and_what_it_must_be(
     refused = _refusal(document)
     assert refused.error == "1 event(s) do not follow the contract"
     assert [item.reason for item in refused.rejected_events] == [reason]
+
+
+def test_an_unmanaged_use_is_accepted_without_a_version_and_refused_with_one() -> None:
+    document = _valid()
+    document["events"][0].update(event_type="unmanaged.used")
+    del document["events"][0]["artifact_version"]
+    assert is_successful(_read(document))
+
+    document["events"][0]["artifact_version"] = "1.0.0"
+    refused = _refusal(document)
+    assert [item.reason for item in refused.rejected_events] == [
+        "an unmanaged.used event has no artifact_version"
+    ]
 
 
 def test_a_refusal_as_a_whole_says_why() -> None:

@@ -40,6 +40,11 @@ class InMemoryEventRepository:
     ) -> IOResult[tuple[stats.ArtifactUsage, ...], StorageError]:
         return IOSuccess(stats.top_artifacts(self._events.values(), period, limit))
 
+    def top_unmanaged(
+        self, period: stats.Window, limit: int
+    ) -> IOResult[tuple[stats.UnmanagedUsage, ...], StorageError]:
+        return IOSuccess(stats.top_unmanaged(self._events.values(), period, limit))
+
     def daily(self, period: stats.Window) -> IOResult[tuple[stats.DailyCount, ...], StorageError]:
         return IOSuccess(stats.daily(self._events.values(), period))
 

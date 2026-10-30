@@ -21,11 +21,13 @@ __all__ = [
     "DailyCount",
     "SourceUsage",
     "Summary",
+    "UnmanagedUsage",
     "Window",
     "by_source",
     "daily",
     "summarise",
     "top_artifacts",
+    "top_unmanaged",
     "window",
 ]
 
@@ -60,6 +62,8 @@ class Summary:
     active_clients: int
     using_clients: int
     used_artifacts: int
+    #: Uses of skills and MCPs aart-cli did not install; never part of `uses`.
+    unmanaged_uses: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +73,18 @@ class ArtifactUsage:
     uses: int
     clients: int
     installs: int
+    last_used: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class UnmanagedUsage:
+    """A skill or MCP aart-cli did not install, by the name the harness used: how often, by how
+    many installations, and when last."""
+
+    artifact_type: str
+    artifact_id: str
+    uses: int
+    clients: int
     last_used: datetime
 
 
@@ -109,6 +125,7 @@ def summarise(events: Iterable[StoredEvent], period: Window) -> Summary:
         active_clients=len({stored.client_id for stored in held}),
         using_clients=len({stored.client_id for stored in uses}),
         used_artifacts=len({_artifact(stored) for stored in uses}),
+        unmanaged_uses=kinds[EventType.UNMANAGED_USED],
     )
 
 
@@ -135,6 +152,30 @@ def top_artifacts(
             uses=len(used),
             clients=len({stored.client_id for stored in used}),
             installs=installs[(kind, name)],
+            last_used=max(stored.event.occurred_at for stored in used),
+        )
+        for (kind, name), used in ranked[:limit]
+    )
+
+
+def top_unmanaged(
+    events: Iterable[StoredEvent], period: Window, limit: int
+) -> tuple[UnmanagedUsage, ...]:
+    """Tools aart-cli did not install by uses, then name, then kind; kept apart from artifacts."""
+
+    if not 1 <= limit <= MAX_TOP:
+        raise ValueError(f"a list is 1 to {MAX_TOP} tools long")
+    uses: dict[tuple[str, str], list[StoredEvent]] = {}
+    for stored in _within(events, period):
+        if stored.event.event_type is EventType.UNMANAGED_USED:
+            uses.setdefault(_artifact(stored), []).append(stored)
+    ranked = sorted(uses.items(), key=lambda item: (-len(item[1]), item[0][1], item[0][0]))
+    return tuple(
+        UnmanagedUsage(
+            artifact_type=kind,
+            artifact_id=name,
+            uses=len(used),
+            clients=len({stored.client_id for stored in used}),
             last_used=max(stored.event.occurred_at for stored in used),
         )
         for (kind, name), used in ranked[:limit]
