@@ -47,3 +47,13 @@ jobs:
       - run: pipx install poetry==2.4.1
       - run: poetry install --with dev --all-extras
       - run: poetry run pytest -q tests/test_repository_contract.py
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: docker build -t aart-cli-telemetry-server:ci .
+      - run: python scripts/image_smoke.py aart-cli-telemetry-server:ci

@@ -120,10 +120,61 @@ to, the test that holds artifact ids in code-point order passes even without the
 "C"`. `tests/test_e2e_aart_cli.py` runs a real aart-cli against a real server when `AART_CLI_PYTHON`
 names an interpreter that imports `aart_cli`, and is skipped otherwise.
 
+## Container image
+
+The `Dockerfile` builds an image for a container platform such as AKS or Azure Container Apps:
+
+```bash
+docker build -t aart-cli-telemetry-server .
+```
+
+- **The database is SQLite on the `/data` volume** unless `AART_CLI_TELEMETRY_DATABASE_URL` names
+  another. The `postgresql` extra is installed, so a PostgreSQL URL works without a rebuild. Pass the
+  URL as a secret, since it can carry a password.
+- **It listens on `0.0.0.0:8000` only with `--behind-authenticating-proxy`** as the container's
+  argument. Without it the container refuses to start, as `serve` does elsewhere, because a
+  container's port is reachable from beyond its host.
+- **It runs as uid 10001** with nothing writable but `/data`, so a read-only root filesystem works. A
+  bind-mounted `/data` must be writable by that uid; a named volume is prepared by the image.
+- **Health** is `GET /healthz` on port 8000; point the platform's liveness and readiness probes at
+  it. The image's own `HEALTHCHECK` does the same for Docker.
+
+To try it on this machine, publish the port to loopback only:
+
+```bash
+docker run --rm -p 127.0.0.1:8000:8000 -v aart-cli-telemetry:/data aart-cli-telemetry-server --behind-authenticating-proxy
+```
+
+SQLite needs a disk of its own: a block device such as an Azure Disk behind one replica. A network
+share such as Azure Files, the storage Azure Container Apps and App Service mount, does not give
+SQLite the locking WAL mode relies on. There, use PostgreSQL, such as Azure Database for PostgreSQL.
+Run one replica on SQLite; several replicas need PostgreSQL.
+
+A consistent copy of the SQLite database, taken while the server runs:
+
+```bash
+docker exec CONTAINER aart-cli-telemetry-server backup /data/backup.sqlite3
+```
+
+`make image-smoke` builds the image and checks it with Docker. It checks:
+
+- the refusal without the flag;
+- a read-only container as uid 10001 storing a batch from the contract;
+- the database at 0600;
+- the backup;
+- a second container serving what the first stored;
+- the same image on PostgreSQL.
+
+CI runs it on every change.
+
 ## Not yet
 
-Deployment to AKS (a container, one replica on a persistent disk, an authenticating ingress,
-scheduled backups and a tested restore) is the next stage and is not in this repository yet.
+The rest of the deployment to AKS is the next stage and is not in this repository yet:
+
+- publishing the image to a registry;
+- manifests for one replica on a persistent disk;
+- an authenticating ingress;
+- scheduled backups and a tested restore.
 
 ## Licence
 
