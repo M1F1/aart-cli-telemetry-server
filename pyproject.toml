@@ -53,6 +53,8 @@ ignore = ["PLR0911", "PLR0913", "PLR2004"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S104"]
+# The image check drives docker and the published port: those are what it checks.
+"scripts/**" = ["S101", "S310", "S603", "S607"]
 
 [tool.mypy]
 strict = true
