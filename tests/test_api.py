@@ -49,7 +49,13 @@ def client(repository: SqlEventRepository) -> TestClient:
 
 def _kept(client: TestClient) -> int:
     summary = client.get("/api/v1/stats/summary?days=366").json()
-    return int(summary["uses"] + summary["installs"] + summary["updates"] + summary["removals"])
+    return int(
+        summary["uses"]
+        + summary["unmanaged_uses"]
+        + summary["installs"]
+        + summary["updates"]
+        + summary["removals"]
+    )
 
 
 def test_a_batch_is_stored_and_every_id_acknowledged(client: TestClient) -> None:
@@ -137,6 +143,37 @@ def test_stats_separate_installs_from_uses(client: TestClient) -> None:
         }
     ]
     assert sources == [{"source": "opencode_plugin", "artifact_type": "mcp", "uses": 1}]
+
+
+def test_uses_of_tools_aart_cli_did_not_install_have_their_own_list(client: TestClient) -> None:
+    client.post(BATCH, json=_request())
+    client.post(BATCH, json=_request(2))
+
+    top = client.get("/api/v1/stats/top-unmanaged").json()["tools"]
+    summary = client.get("/api/v1/stats/summary").json()
+
+    assert top == [
+        {
+            "artifact_type": "mcp",
+            "artifact_id": "context7_resolve-library-id",
+            "uses": 1,
+            "clients": 1,
+            "last_used": "2026-10-29T17:00:00.000000Z",
+        },
+        {
+            "artifact_type": "skill",
+            "artifact_id": "superpowers:brainstorming",
+            "uses": 1,
+            "clients": 1,
+            "last_used": "2026-10-29T17:00:00.000000Z",
+        },
+    ]
+    assert (summary["uses"], summary["unmanaged_uses"]) == (1, 2)
+    assert [
+        item["artifact_id"]
+        for item in client.get("/api/v1/stats/top-artifacts").json()["artifacts"]
+    ] == ["jira-mcp"]
+    assert client.get("/api/v1/stats/top-unmanaged?limit=201").status_code == 422
 
 
 def test_old_events_fall_outside_the_period_and_a_period_has_bounds(client: TestClient) -> None:

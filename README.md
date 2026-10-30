@@ -2,7 +2,8 @@
 
 Receives artifact telemetry from [aart-cli](https://github.com/M1F1/aart-cli), stores it in a
 database -- SQLite by default, PostgreSQL by URL -- and shows it on a dashboard in the browser: which artifacts are used, how often, by how many
-installations, and how installs, updates and removals change over time.
+installations, and how installs, updates and removals change over time. Uses of skills and MCPs
+aart-cli did not install (`unmanaged.used`) are counted apart, by the name the harness gave them.
 
 - **The contract** between aart-cli and this server is [`docs/telemetry-api-v1.md`](docs/telemetry-api-v1.md)
   with [`contract/telemetry-api-v1.examples.json`](contract/telemetry-api-v1.examples.json). Both
@@ -91,8 +92,9 @@ takes a consistent copy with SQLite's online backup while the server runs. For P
 | `POST /api/v1/events/batch` | The contract's ingest endpoint. |
 | `GET /healthz` | `{"status": "ok"}` when the database can be read. |
 | `GET /dashboard` | The dashboard. |
-| `GET /api/v1/stats/summary?days=30` | Uses, installs, updates, removals, active installations. |
+| `GET /api/v1/stats/summary?days=30` | Uses, installs, updates, removals, active installations, uses of tools aart-cli did not install. |
 | `GET /api/v1/stats/top-artifacts?days=30&limit=20` | Artifacts by uses. |
+| `GET /api/v1/stats/top-unmanaged?days=30&limit=20` | Skills and MCPs aart-cli did not install, by uses (`unmanaged.used`). |
 | `GET /api/v1/stats/daily?days=30` | Per UTC day. |
 | `GET /api/v1/stats/by-source?days=30` | Uses per harness and kind. |
 

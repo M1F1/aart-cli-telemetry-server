@@ -36,7 +36,8 @@ def _stored(
     source: Source | None = None,
     event_id: str | None = None,
 ) -> StoredEvent:
-    chosen = source or (Source.AART_CLI if kind is not EventType.USED else Source.CLAUDE_HOOK)
+    used = kind in (EventType.USED, EventType.UNMANAGED_USED)
+    chosen = source or (Source.CLAUDE_HOOK if used else Source.AART_CLI)
     number = next(_NUMBERS)
     return StoredEvent(
         Event(
@@ -52,6 +53,29 @@ def _stored(
         "0.22.0",
         NOW,
     )
+
+
+def test_uses_of_tools_aart_cli_did_not_install_are_counted_apart() -> None:
+    history = [
+        _stored(EventType.INSTALLED),
+        _stored(EventType.USED),
+        _stored(EventType.UNMANAGED_USED, "context7"),
+        _stored(EventType.UNMANAGED_USED, "context7", client=CLIENTS[1], days_ago=1),
+        _stored(EventType.UNMANAGED_USED, "brainstorming", source=Source.OPENCODE_PLUGIN),
+        _stored(EventType.UNMANAGED_USED, "old", days_ago=30),
+    ]
+
+    summary = stats.summarise(history, WEEK)
+    assert (summary.uses, summary.unmanaged_uses, summary.used_artifacts) == (1, 3, 1)
+    assert [item.artifact_id for item in stats.top_artifacts(history, WEEK, 10)] == ["github"]
+    assert stats.top_unmanaged(history, WEEK, 10) == (
+        stats.UnmanagedUsage("mcp", "context7", 2, 2, NOW),
+        stats.UnmanagedUsage("mcp", "brainstorming", 1, 1, NOW),
+    )
+    assert [item.uses for item in stats.daily(history, WEEK)] == [0, 1]
+    assert [item.uses for item in stats.by_source(history, WEEK)] == [1]
+    with pytest.raises(ValueError, match="1 to"):
+        stats.top_unmanaged(history, WEEK, stats.MAX_TOP + 1)
 
 
 def test_installs_and_uses_are_counted_apart() -> None:
@@ -71,6 +95,7 @@ def test_installs_and_uses_are_counted_apart() -> None:
         active_clients=2,
         using_clients=2,
         used_artifacts=2,
+        unmanaged_uses=0,
     )
     top = stats.top_artifacts(history, WEEK, 10)
     assert [(item.artifact_id, item.uses, item.clients, item.installs) for item in top] == [
@@ -198,6 +223,8 @@ def test_a_moment_in_another_zone_is_refused() -> None:
         Event("x", elsewhere, EventType.USED, Source.CLAUDE_HOOK, "a", "mcp", None)
     with pytest.raises(ValueError, match="this source cannot report this event type"):
         Event("x", NOW, EventType.USED, Source.AART_CLI, "a", "mcp", None)
+    with pytest.raises(ValueError, match="an unmanaged use has no version"):
+        Event("x", NOW, EventType.UNMANAGED_USED, Source.CLAUDE_HOOK, "a", "mcp", "1.0.0")
 
 
 def test_a_kept_event_remembers_the_client_and_version() -> None:

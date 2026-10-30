@@ -4,8 +4,10 @@ Skipped unless `AART_CLI_PYTHON` names a Python interpreter that imports `aart_c
 an aart-cli checkout's virtual environment). It runs this server on a free loopback port, turns
 telemetry on in a throwaway `AART_CLI_HOME`, puts lifecycle events in aart-cli's own outbox the way
 a completed install does, sends them with `aart-cli consume telemetry sync`, sends them again, and
-reads them back from this server's database once each. Nothing touches the real home: HOME and
-AART_CLI_HOME are temporary directories.
+reads them back from this server's database once each. A second test keeps a use of an MCP no
+artifact answers to, sends it as `unmanaged.used`, and after `consume telemetry unmanaged off` sends
+the next one no more. Nothing touches the real home: HOME and AART_CLI_HOME are temporary
+directories; PYTHONPATH is passed on, so it can name an aart-cli checkout.
 """
 
 from __future__ import annotations
@@ -52,6 +54,15 @@ events = tuple(
 )
 # Fixed ids rather than the ones the outbox draws, so a second home sends the same ones again.
 print(outbox.record_action("action-1", lambda ids: events))
+"""
+
+_USE = """
+import sys
+from aart_cli.domain.artifact_usage import ArtifactUse, UsageKind
+from aart_cli.io.telemetry_store import TelemetryOutbox
+
+use = ArtifactUse("claude", UsageKind.MCP, "context7")
+print(TelemetryOutbox(sys.argv[1] + "/state").record_use(use, "2026-10-29T17:00:00Z", sys.argv[2]))
 """
 
 
@@ -102,6 +113,7 @@ def test_aart_cli_delivers_each_event_once(
             "PATH": os.environ.get("PATH", ""),
             "HOME": str(tmp_path / f"{name}-user"),
             "AART_CLI_HOME": str(home),
+            "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
         }
         assert _telemetry(environment, "status")["enabled"] is False
         assert _telemetry(environment, "enable", "--endpoint", url)["ok"] is True
@@ -119,3 +131,32 @@ def test_aart_cli_delivers_each_event_once(
 
     summary = perform(repository.summary(window(30, NOW))).unwrap()
     assert summary.installs == 150
+
+
+def test_a_use_aart_cli_did_not_install_is_sent_until_the_person_turns_it_off(
+    served: tuple[str, SqlEventRepository], tmp_path: Path
+) -> None:
+    url, repository = served
+    home = tmp_path / "home"
+    environment = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(tmp_path / "user"),
+        "AART_CLI_HOME": str(home),
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+    }
+    assert _telemetry(environment, "enable", "--endpoint", url)["ok"] is True
+    assert _telemetry(environment, "status")["unmanaged_uses"] == {"sent": True, "chosen": False}
+
+    assert _run(environment, "-c", _USE, str(home), "use-1").stdout == b"Ok(value=True)\n"
+    assert _telemetry(environment, "sync")["sent"] == 1
+
+    assert _telemetry(environment, "unmanaged", "off")["ok"] is True
+    assert _run(environment, "-c", _USE, str(home), "use-2").stdout == b"Ok(value=True)\n"
+    report = _telemetry(environment, "sync", "--force")
+    assert (report["sent"], report["skipped"]) == (0, 1)
+
+    period = window(30, NOW)
+    summary = perform(repository.summary(period)).unwrap()
+    assert (summary.uses, summary.unmanaged_uses) == (0, 1)
+    (tool,) = perform(repository.top_unmanaged(period, 10)).unwrap()
+    assert (tool.artifact_type, tool.artifact_id, tool.uses) == ("mcp", "context7", 1)

@@ -82,6 +82,8 @@ def _same_numbers(repository: EventRepository, oracle: EventRepository, days: in
         lambda r: r.by_source(period),
         lambda r: r.top_artifacts(period, 5),
         lambda r: r.top_artifacts(period, stats.MAX_TOP),
+        lambda r: r.top_unmanaged(period, 5),
+        lambda r: r.top_unmanaged(period, stats.MAX_TOP),
     )
     for read in reads:
         assert _value(read(repository)) == _value(read(oracle))
@@ -124,7 +126,7 @@ def test_nothing_to_add_and_ping(make: Callable[[], EventRepository]) -> None:
     repository = make()
     assert repository.add([]) == IOSuccess(None)
     assert repository.ping() == IOSuccess(None)
-    assert _value(repository.summary(stats.window(1, NOW))) == stats.Summary(0, 0, 0, 0, 0, 0, 0)
+    assert _value(repository.summary(stats.window(1, NOW))) == stats.Summary(0, 0, 0, 0, 0, 0, 0, 0)
 
 
 # -- SQLite on disk --------------------------------------------------------------------------------

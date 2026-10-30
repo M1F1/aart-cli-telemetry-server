@@ -54,6 +54,32 @@
           }
         ]
       }
+    },
+    {
+      "name": "uses of a skill and an MCP aart-cli did not install",
+      "request": {
+        "schema_version": 1,
+        "client_id": "0b6f4d1e-8f8a-4a43-9a52-2f0f5d0f6a11",
+        "client_version": "0.23.0",
+        "events": [
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0004",
+            "occurred_at": "2026-10-30T09:00:00Z",
+            "event_type": "unmanaged.used",
+            "source": "claude_hook",
+            "artifact_id": "superpowers:brainstorming",
+            "artifact_type": "skill"
+          },
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0005",
+            "occurred_at": "2026-10-30T09:01:00Z",
+            "event_type": "unmanaged.used",
+            "source": "opencode_plugin",
+            "artifact_id": "context7_resolve-library-id",
+            "artifact_type": "mcp"
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -140,6 +166,31 @@
         "source": "aart_cli",
         "artifact_id": "release-notes",
         "artifact_type": "skill"
+      }
+    },
+    {
+      "name": "an unmanaged use from aart-cli",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000008",
+        "occurred_at": "2026-10-30T09:00:00Z",
+        "event_type": "unmanaged.used",
+        "source": "aart_cli",
+        "artifact_id": "brainstorming",
+        "artifact_type": "skill"
+      }
+    },
+    {
+      "name": "an unmanaged use with a version",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000009",
+        "occurred_at": "2026-10-30T09:00:00Z",
+        "event_type": "unmanaged.used",
+        "source": "claude_hook",
+        "artifact_id": "brainstorming",
+        "artifact_type": "skill",
+        "artifact_version": "1.0.0"
       }
     }
   ]

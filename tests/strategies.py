@@ -40,7 +40,7 @@ def events(draw: st.DrawFn, ids: st.SearchStrategy[str] = uuids) -> Event:
             st.sampled_from(("github", "jira-mcp", "review", "Zeta", "alpha")) | names
         ),
         artifact_type=draw(kinds),
-        artifact_version=draw(versions),
+        artifact_version=None if kind is EventType.UNMANAGED_USED else draw(versions),
     )
 
 
