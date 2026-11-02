@@ -145,3 +145,20 @@ def test_a_directory_that_is_no_repository_is_read_whole(tmp_path: Path) -> None
 def test_a_line_is_one_finding_of_a_kind_however_many_strings_carry_it() -> None:
     one = '"' + assignment("password", held()) + '"'
     assert _codes(f"said = {one} + {one}") == ["credential-assignment"]
+
+
+@pytest.mark.parametrize(
+    "name", ["API_TOKEN", "DB_PASSWORD", "client_secret", "SERVICE_CREDENTIAL"]
+)
+def test_a_key_that_ends_in_a_credential_word_is_refused(name: str) -> None:
+    assert _codes('said = "' + assignment(name, held()) + '"') == ["credential-assignment"]
+    quoted = '"' + held() + '"'
+    assert _codes(f"{name} = {quoted}") == ["credential-literal"]
+
+
+def test_a_key_that_names_where_a_secret_is_kept_is_allowed() -> None:
+    # `..._SECRET_NAME` holds the name of a secret, which is no secret.
+    assert (
+        _codes('said = "' + assignment("AART_CLI_TELEMETRY_PASSWORD_SECRET_NAME", "MINE") + '"')
+        == []
+    )
