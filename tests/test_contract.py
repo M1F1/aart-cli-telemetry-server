@@ -222,7 +222,10 @@ def test_a_value_of_the_wrong_type_is_refused_never_coerced(item: Event, value: 
         assert [entry.index for entry in _refusal(document).rejected_events] == [0], field
 
 
-_ENVELOPE = "the request must hold exactly schema_version, client_id, client_version and events"
+_ENVELOPE = (
+    "the request must hold exactly schema_version, client_id, client_version and events, "
+    "and may hold automated"
+)
 
 
 @pytest.mark.parametrize(
@@ -237,6 +240,7 @@ _ENVELOPE = "the request must hold exactly schema_version, client_id, client_ver
         (lambda r: r.update(events=[]), f"events must be a list of 1 to {MAX_EVENTS} events"),
         (lambda r: r.update(hostname="laptop"), _ENVELOPE),
         (lambda r: r.pop("client_version"), _ENVELOPE),
+        (lambda r: r.update(automated="true"), "automated must be true or false"),
     ],
 )
 def test_a_refused_envelope_says_what_the_contract_wants(
@@ -300,3 +304,26 @@ def test_a_refusal_as_a_whole_says_why() -> None:
     too_big = refused(b" " * (MAX_BODY_BYTES + 1))
     assert too_big.error == f"the request body is larger than {MAX_BODY_BYTES} bytes"
     assert refused(b" " * MAX_BODY_BYTES).kind is RefusalKind.NOT_JSON
+
+
+def test_an_automated_installation_says_so_and_a_person_need_not() -> None:
+    document = _valid()
+    assert _read(document).unwrap().automated is False
+    document["automated"] = True
+    assert _read(document).unwrap().automated is True
+    document["automated"] = False
+    assert _read(document).unwrap().automated is False
+
+
+@given(
+    value=st.none()
+    | st.integers()
+    | st.text()
+    | st.floats(allow_nan=False)
+    | st.lists(st.booleans())
+)
+def test_automated_is_true_or_false_and_never_coerced(value: object) -> None:
+    document = _valid()
+    document["automated"] = value
+    refused = _refusal(document)
+    assert (refused.error, refused.rejected_events) == ("automated must be true or false", ())

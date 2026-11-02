@@ -20,8 +20,9 @@ function tiles(summary) {
   const items = [
     ["Uses", summary.uses],
     ["Artifacts used", summary.used_artifacts],
-    ["Installations using artifacts", summary.using_clients],
-    ["Active installations", summary.active_clients],
+    ["People's installations using artifacts", summary.using_clients],
+    ["People's active installations", summary.active_clients],
+    ["Automated installations (CI)", summary.automated_clients],
     ["Installs", summary.installs],
     ["Updates", summary.updates],
     ["Removals", summary.removals],
@@ -74,7 +75,8 @@ async function refresh() {
   const labels = daily.daily.map((row) => row.day);
   draw("daily", "line", labels, [
     { label: "Uses", data: daily.daily.map((row) => row.uses), borderColor: color("--accent"), backgroundColor: color("--accent") },
-    { label: "Active installations", data: daily.daily.map((row) => row.active_clients), borderColor: color("--muted"), backgroundColor: color("--muted") },
+    { label: "People's active installations", data: daily.daily.map((row) => row.active_clients), borderColor: color("--muted"), backgroundColor: color("--muted") },
+    { label: "Automated installations", data: daily.daily.map((row) => row.automated_clients), borderColor: color("--accent-3"), backgroundColor: color("--accent-3"), borderDash: [4, 4] },
   ]);
   draw("lifecycle", "bar", labels, [
     { label: "Installs", data: daily.daily.map((row) => row.installs), backgroundColor: color("--accent-2") },

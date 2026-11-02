@@ -61,13 +61,18 @@ class Summary:
     installs: int
     updates: int
     removals: int
+    #: People's installations: those whose events were not sent as automation.
     active_clients: int
+    #: People's installations that used an artifact.
     using_clients: int
     used_artifacts: int
     #: Uses of skills and MCPs aart-cli did not install; never part of `uses`.
     unmanaged_uses: int
     #: Failures aart-cli met (`aart_cli.failed`).
     failures: int
+    #: Installations whose events were sent as automation, such as CI jobs; one that sent both
+    #: kinds is counted in each.
+    automated_clients: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +124,7 @@ class DailyCount:
     updates: int
     removals: int
     active_clients: int
+    automated_clients: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +142,14 @@ def _artifact(stored: StoredEvent) -> tuple[str, str]:
     return stored.event.artifact_type, stored.event.artifact_id
 
 
+def _people(held: Iterable[StoredEvent]) -> int:
+    return len({stored.client_id for stored in held if not stored.automated})
+
+
+def _automated(held: Iterable[StoredEvent]) -> int:
+    return len({stored.client_id for stored in held if stored.automated})
+
+
 def summarise(events: Iterable[StoredEvent], period: Window) -> Summary:
     held = _within(events, period)
     kinds = Counter(stored.event.event_type for stored in held)
@@ -145,11 +159,12 @@ def summarise(events: Iterable[StoredEvent], period: Window) -> Summary:
         installs=kinds[EventType.INSTALLED],
         updates=kinds[EventType.UPDATED],
         removals=kinds[EventType.REMOVED],
-        active_clients=len({stored.client_id for stored in held}),
-        using_clients=len({stored.client_id for stored in uses}),
+        active_clients=_people(held),
+        using_clients=_people(uses),
         used_artifacts=len({_artifact(stored) for stored in uses}),
         unmanaged_uses=kinds[EventType.UNMANAGED_USED],
         failures=kinds[EventType.FAILED],
+        automated_clients=_automated(held),
     )
 
 
@@ -246,7 +261,8 @@ def top_failures(
 
 
 def daily(events: Iterable[StoredEvent], period: Window) -> tuple[DailyCount, ...]:
-    """Per UTC day that has any event: each kind's count and the installations active that day."""
+    """Per UTC day that has any event: each kind's count, and the people's and the automated
+    installations active that day."""
 
     days: dict[date, list[StoredEvent]] = {}
     for stored in _within(events, period):
@@ -262,7 +278,8 @@ def daily(events: Iterable[StoredEvent], period: Window) -> tuple[DailyCount, ..
             installs=count(held, EventType.INSTALLED),
             updates=count(held, EventType.UPDATED),
             removals=count(held, EventType.REMOVED),
-            active_clients=len({stored.client_id for stored in held}),
+            active_clients=_people(held),
+            automated_clients=_automated(held),
         )
         for day, held in sorted(days.items())
     )

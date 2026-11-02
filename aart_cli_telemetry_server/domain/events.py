@@ -128,6 +128,8 @@ class Batch:
     client_id: str
     client_version: str
     events: tuple[Event, ...]
+    #: The installation said it runs as automation, such as a CI job, rather than for a person.
+    automated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +140,8 @@ class StoredEvent:
     client_id: str
     client_version: str
     received_at: datetime
+    #: As the request that delivered it said; an event kept before keeps what its first said.
+    automated: bool = False
 
     def __post_init__(self) -> None:
         _utc(self.received_at)
@@ -159,7 +163,8 @@ def stored_events(batch: Batch, received_at: datetime) -> tuple[StoredEvent, ...
     seen: dict[str, StoredEvent] = {}
     for event in batch.events:
         seen.setdefault(
-            event.event_id, StoredEvent(event, batch.client_id, batch.client_version, received_at)
+            event.event_id,
+            StoredEvent(event, batch.client_id, batch.client_version, received_at, batch.automated),
         )
     return tuple(seen.values())
 

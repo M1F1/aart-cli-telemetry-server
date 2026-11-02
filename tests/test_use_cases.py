@@ -99,7 +99,7 @@ def test_each_reading_asks_for_the_last_days_before_the_clock(days: int, limit: 
     since = stats.Window(NOW - timedelta(days=days))
 
     assert use_cases.summary(days, repository, lambda: NOW) == IOSuccess(
-        stats.Summary(0, 0, 0, 0, 0, 0, 0, 0, 0)
+        stats.Summary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     )
     assert use_cases.top_artifacts(days, limit, repository, lambda: NOW) == IOSuccess(())
     assert use_cases.top_unmanaged(days, limit, repository, lambda: NOW) == IOSuccess(())

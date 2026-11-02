@@ -143,6 +143,35 @@
           }
         ]
       }
+    },
+    {
+      "name": "an install and a use from automation, such as a CI job",
+      "request": {
+        "schema_version": 1,
+        "client_id": "5e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a44",
+        "client_version": "0.22.0",
+        "automated": true,
+        "events": [
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0009",
+            "occurred_at": "2026-11-02T09:03:00Z",
+            "event_type": "artifact.installed",
+            "source": "aart_cli",
+            "artifact_id": "release-notes",
+            "artifact_type": "skill",
+            "artifact_version": "1.2.0"
+          },
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0010",
+            "occurred_at": "2026-11-02T09:04:00Z",
+            "event_type": "artifact.used",
+            "source": "claude_hook",
+            "artifact_id": "release-notes",
+            "artifact_type": "skill",
+            "artifact_version": "1.2.0"
+          }
+        ]
+      }
     }
   ],
   "invalid": [
