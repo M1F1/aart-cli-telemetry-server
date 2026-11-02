@@ -243,6 +243,13 @@ def test_backup_is_a_consistent_readable_owner_only_copy(
 
 
 def _empty(url: str) -> None:
+    """No tables; for SQLite no file either, so each round starts in a new file's journal mode."""
+
+    if url.startswith("sqlite"):
+        database = url.removeprefix("sqlite:///")
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{database}{suffix}").unlink(missing_ok=True)
+        return
     engine = create_engine(url)
     with engine.begin() as connection:
         metadata.drop_all(connection)
@@ -279,12 +286,18 @@ def _shared(tmp_path: Path, backend: str) -> str:
     return sqlite_url(str(tmp_path / "data"))
 
 
+#: Rounds of servers starting together. On a new SQLite file one round in about five lost a
+#: server without the retry `_wal` makes, so thirty miss that about once in a thousand runs;
+#: PostgreSQL lost every round without its lock.
+ROUNDS = {"sqlite": 30, "postgresql": 5}
+
+
 @pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
 def test_replicas_starting_together_on_an_empty_database_all_open_it(
     tmp_path: Path, backend: str
 ) -> None:
     url = _shared(tmp_path, backend)
-    for _ in range(3):
+    for _ in range(ROUNDS[backend]):
         _empty(url)
         assert _opened_together(url) == [True] * 4
         engine = create_engine(url)
@@ -300,7 +313,7 @@ def test_replicas_starting_together_on_a_database_before_failures_all_open_it(
     tmp_path: Path, backend: str
 ) -> None:
     url = _shared(tmp_path, backend)
-    for _ in range(3):
+    for _ in range(ROUNDS[backend]):
         _empty(url)
         _value(open_repository(url)).engine.dispose()
         engine = create_engine(url)
