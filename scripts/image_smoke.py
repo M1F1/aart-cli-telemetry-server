@@ -16,7 +16,7 @@ import urllib.request
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +50,7 @@ def batch() -> dict[str, Any]:
     """The contract's first valid example, with fresh ids and the current moment."""
 
     example: dict[str, Any] = json.loads(EXAMPLES.read_text())["valid"][0]["request"]
-    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     example["client_id"] = str(uuid.uuid4())
     example["events"] = [
         {**event, "event_id": str(uuid.uuid4()), "occurred_at": now} for event in example["events"]

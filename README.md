@@ -153,7 +153,8 @@ docker build -t aart-cli-telemetry-server .
 ```
 
 - **What it installs is what `poetry.lock` pins**, by pip with every hash checked. `PYTHON_IMAGE` is
-  the base, any Debian-based image with Python 3.11 or later. The packages come from pip's index, or
+  the base, any Debian-based image with Python 3.11 or later whose Python has `venv` and
+  `ensurepip` and which has `useradd`, as the official `python` images do. The packages come from pip's index, or
   from the one the build secret `pip-index` holds (a URL, with credentials where it needs them),
   which is present only while pip runs and never in a layer:
 
@@ -246,21 +247,29 @@ its fallback, and a secret is named by a variable, never read by a fixed name, a
 | `AART_CLI_TELEMETRY_PIP_INDEX_URL` | the package index | `https://pypi.org/simple` |
 | `AART_CLI_TELEMETRY_PIP_INDEX_CREDENTIALS_SECRET_NAME` | the secret holding the index's `user:password` | none |
 | `AART_CLI_TELEMETRY_PYTHON_IMAGE` | the image's base | `python:3.13-slim-bookworm` |
-| `AART_CLI_TELEMETRY_POSTGRES_IMAGE` | the PostgreSQL image the checks run against | `postgres:16`, `postgres:16-alpine` |
-| `AART_CLI_TELEMETRY_PULL_REGISTRY` | the registry those images are pulled from, when it needs credentials | none |
-| `AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME` | the secret holding that registry's user name | images are pulled without signing in |
-| `AART_CLI_TELEMETRY_PULL_PASSWORD_SECRET_NAME` | the secret holding that registry's password or token | images are pulled without signing in |
+| `AART_CLI_TELEMETRY_POSTGRES_IMAGE` | the PostgreSQL image the checks run against | `postgres:16` |
+| `AART_CLI_TELEMETRY_CI_IMAGES_USERNAME_SECRET_NAME` | the secret holding the user name the CI images are pulled with | pulled as the runner is signed in, or anonymously |
+| `AART_CLI_TELEMETRY_CI_IMAGES_PASSWORD_SECRET_NAME` | the secret holding that user's password or token | as above |
+| `AART_CLI_TELEMETRY_PYTHON_IMAGE_USERNAME_SECRET_NAME` | the secret holding the user name the image's base is pulled with | as above |
+| `AART_CLI_TELEMETRY_PYTHON_IMAGE_PASSWORD_SECRET_NAME` | the secret holding that user's password or token | as above |
+| `AART_CLI_TELEMETRY_POSTGRES_IMAGE_USERNAME_SECRET_NAME` | the secret holding the user name the PostgreSQL image is pulled with | as above |
+| `AART_CLI_TELEMETRY_POSTGRES_IMAGE_PASSWORD_SECRET_NAME` | the secret holding that user's password or token | as above |
 | `AART_CLI_TELEMETRY_IMAGE_REGISTRY` | the registry the image is published to | not published |
 | `AART_CLI_TELEMETRY_IMAGE_REPOSITORY` | the image's repository there | `aart-cli-telemetry-server` |
 | `AART_CLI_TELEMETRY_IMAGE_USERNAME_SECRET_NAME` | the secret holding the registry user name | the runner's own sign-in |
 | `AART_CLI_TELEMETRY_IMAGE_PASSWORD_SECRET_NAME` | the secret holding the registry password or token | the runner's own sign-in |
 
-With pull credentials named, every image is pulled from the one registry they sign in to: the CI
-images and the PostgreSQL service through the jobs' `credentials`, and the image's base and the
-image check's PostgreSQL through `docker login` before the build. A `credentials` block cannot be
-made conditional, so each check in a container is two jobs, and only the one that fits runs. The
-`image` and `publish` jobs run on the runner itself, which needs Docker with BuildKit and
-`python3`.
+Each image has credentials of its own, so the CI images, the base and PostgreSQL can come from
+different registries that take different accounts, or none: name a pair for an image that needs
+one, the same secrets for images that share an account, and nothing for an image pulled
+anonymously or with the runner's own sign-in. A pair signs in to the registry the image's name
+begins with, in a Docker configuration made for that one pull and removed after it, with the
+password on Docker's stdin (`scripts/pull_image.py`).
+
+Every job runs on the runner itself, which needs Docker with its default builder and a `python3`
+of 3.8 or later (ruff holds the scripts that run there to 3.8). Each job pulls its images first;
+the checks then run in a CI image on a copy of the checkout, with PostgreSQL beside them where a
+check needs it (`scripts/check_in_image.py`), and the image's build uses the base already pulled.
 
 With a registry named, every change on `main` that passes every check is built and checked again,
 then pushed as `REGISTRY/REPOSITORY:sha-<first 12 of the commit>` and `:main`. A deployment names
