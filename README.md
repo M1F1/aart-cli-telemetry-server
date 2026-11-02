@@ -137,10 +137,12 @@ to, the test that holds artifact ids in code-point order passes even without the
 "C"`. `tests/test_e2e_aart_cli.py` runs a real aart-cli against a real server when `AART_CLI_PYTHON`
 names an interpreter that imports `aart_cli`, and is skipped otherwise.
 
-CI installs without Poetry: `scripts/locked_requirements.py` prints what `poetry.lock` pins, every
-hash with it, and pip installs that, as aart-cli's CI does. Poetry takes an index only from a
-source in `pyproject.toml`, which would change the hash the lock is checked against, while pip
-reads `PIP_INDEX_URL`, so a copy that installs from its own index sets a variable and edits no file.
+CI runs `python scripts/quality.py`, the gates of `make quality` each as `python -m TOOL`, so the
+image the checks run in needs neither make nor a tool on `PATH`. It installs without Poetry:
+`scripts/locked_requirements.py` prints what `poetry.lock` pins, every hash with it, and pip
+installs that, as aart-cli's CI does. Poetry takes an index only from a source in
+`pyproject.toml`, which would change the hash the lock is checked against, while pip reads
+`PIP_INDEX_URL`, so a copy that installs from its own index sets a variable and edits no file.
 
 ## Container image
 
@@ -239,17 +241,26 @@ its fallback, and a secret is named by a variable, never read by a fixed name, a
 | Variable | What it sets | Unset |
 |---|---|---|
 | `AART_CLI_TELEMETRY_RUNNER` | the runner labels, as JSON | `["ubuntu-latest"]` |
-| `AART_CLI_TELEMETRY_CI_PYTHON_IMAGE` | the image the checks run in, tagged with each Python version | `python` |
-| `AART_CLI_TELEMETRY_PYTHON_VERSIONS` | the Python versions `quality` runs under, as JSON | `["3.11", "3.13"]` |
-| `AART_CLI_TELEMETRY_PYTHON_VERSION` | the Python version of the PostgreSQL check | `3.13` |
+| `AART_CLI_TELEMETRY_CI_IMAGES` | the images the checks run in, each named in full, as JSON; the first also runs the PostgreSQL check | `["python:3.13", "python:3.11"]` |
+| `AART_CLI_TELEMETRY_PYTHON` | the interpreter in those images | `python` |
 | `AART_CLI_TELEMETRY_PIP_INDEX_URL` | the package index | `https://pypi.org/simple` |
 | `AART_CLI_TELEMETRY_PIP_INDEX_CREDENTIALS_SECRET_NAME` | the secret holding the index's `user:password` | none |
 | `AART_CLI_TELEMETRY_PYTHON_IMAGE` | the image's base | `python:3.13-slim-bookworm` |
 | `AART_CLI_TELEMETRY_POSTGRES_IMAGE` | the PostgreSQL image the checks run against | `postgres:16`, `postgres:16-alpine` |
+| `AART_CLI_TELEMETRY_PULL_REGISTRY` | the registry those images are pulled from, when it needs credentials | none |
+| `AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME` | the secret holding that registry's user name | images are pulled without signing in |
+| `AART_CLI_TELEMETRY_PULL_PASSWORD_SECRET_NAME` | the secret holding that registry's password or token | images are pulled without signing in |
 | `AART_CLI_TELEMETRY_IMAGE_REGISTRY` | the registry the image is published to | not published |
 | `AART_CLI_TELEMETRY_IMAGE_REPOSITORY` | the image's repository there | `aart-cli-telemetry-server` |
 | `AART_CLI_TELEMETRY_IMAGE_USERNAME_SECRET_NAME` | the secret holding the registry user name | the runner's own sign-in |
 | `AART_CLI_TELEMETRY_IMAGE_PASSWORD_SECRET_NAME` | the secret holding the registry password or token | the runner's own sign-in |
+
+With pull credentials named, every image is pulled from the one registry they sign in to: the CI
+images and the PostgreSQL service through the jobs' `credentials`, and the image's base and the
+image check's PostgreSQL through `docker login` before the build. A `credentials` block cannot be
+made conditional, so each check in a container is two jobs, and only the one that fits runs. The
+`image` and `publish` jobs run on the runner itself, which needs Docker with BuildKit and
+`python3`.
 
 With a registry named, every change on `main` that passes every check is built and checked again,
 then pushed as `REGISTRY/REPOSITORY:sha-<first 12 of the commit>` and `:main`. A deployment names
@@ -268,7 +279,6 @@ git merge upstream/main
 
 ## Not yet
 
-- Pulling a CI image from a registry that needs credentials.
 - Scheduled backups and a tested restore.
 
 ## Licence

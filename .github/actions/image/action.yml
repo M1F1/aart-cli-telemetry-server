@@ -8,6 +8,18 @@ runs:
   using: composite
   steps:
   - uses: ./.github/actions/pip-index
+  # The base image and the PostgreSQL image the check runs are pulled from the registry the job's
+  # credentials sign in to, where it names them; the password goes to Docker on stdin.
+  - name: Sign in to the registry images are pulled from
+    if: env.AART_CLI_TELEMETRY_PULL_USERNAME != ''
+    shell: bash
+    run: |
+      set -euo pipefail
+      if [ -z "${AART_CLI_TELEMETRY_PULL_REGISTRY:-}" ]; then
+        echo "AART_CLI_TELEMETRY_PULL_REGISTRY names no registry for the pull credentials" >&2
+        exit 1
+      fi
+      printf '%s' "$AART_CLI_TELEMETRY_PULL_PASSWORD" | docker login "$AART_CLI_TELEMETRY_PULL_REGISTRY" --username "$AART_CLI_TELEMETRY_PULL_USERNAME" --password-stdin
   # The index reaches the build as the `pip-index` secret, present only while pip runs, so neither
   # it nor its credentials are in a layer.
   - name: Build the image
@@ -18,3 +30,7 @@ runs:
   - name: Check the image
     shell: bash
     run: python3 scripts/image_smoke.py aart-cli-telemetry-server:ci
+  - name: Sign out of the registry images are pulled from
+    if: always() && env.AART_CLI_TELEMETRY_PULL_USERNAME != ''
+    shell: bash
+    run: docker logout "$AART_CLI_TELEMETRY_PULL_REGISTRY" || true
