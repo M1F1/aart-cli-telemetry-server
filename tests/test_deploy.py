@@ -117,7 +117,9 @@ def test_a_target_is_found_by_its_module_alone(
     monkeypatch.delitem(sys.modules, "deploy.targets.elsewhere", raising=False)
 
     found = deploy.known_targets()
-    assert set(found) == {"docker", "elsewhere"}
+    # A copy of this repository has targets of its own beside these.
+    assert {"docker", "elsewhere"} <= set(found)
+    assert "never" not in found
     assert plan_for(found["elsewhere"], {"HOST": "h"}) == (Step(("true", "h"), "why"),)
 
 
@@ -228,7 +230,7 @@ def test_without_apply_the_plan_is_printed_and_nothing_runs(
 @pytest.mark.parametrize(
     ("argv", "text", "said"),
     [
-        (["--target", "nowhere"], "IMAGE=i\n", "no target nowhere; known: docker"),
+        (["--target", "nowhere"], "IMAGE=i\n", "no target nowhere; known: "),
         (["--target", "docker"], None, "the environment file cannot be read"),
         (["--target", "docker"], "IMAGE=i\nAPI_TOKEN=abcdefabcdef1234\n", "names a secret"),
     ],
