@@ -9,14 +9,14 @@ runs:
   steps:
   - uses: ./.github/actions/pip-index
   # Each image is pulled with its own credentials, which the calling step's environment holds
-  # (scripts/pull_image.py), so the build and the check pull nothing themselves: with Docker's
+  # (scripts/registry_image.py), so the build and the check pull nothing themselves: with Docker's
   # default builder, `FROM` uses the base image already pulled.
   - name: Pull the base image
     shell: bash
-    run: python3 scripts/pull_image.py "$AART_CLI_TELEMETRY_PYTHON_IMAGE" AART_CLI_TELEMETRY_PYTHON_IMAGE
+    run: python3 scripts/registry_image.py pull AART_CLI_TELEMETRY_PYTHON_IMAGE "$AART_CLI_TELEMETRY_PYTHON_IMAGE"
   - name: Pull the PostgreSQL image the check runs
     shell: bash
-    run: python3 scripts/pull_image.py "$AART_CLI_TELEMETRY_POSTGRES_IMAGE" AART_CLI_TELEMETRY_POSTGRES_IMAGE
+    run: python3 scripts/registry_image.py pull AART_CLI_TELEMETRY_POSTGRES_IMAGE "$AART_CLI_TELEMETRY_POSTGRES_IMAGE"
   # The index reaches the build as the `pip-index` secret, present only while pip runs, so neither
   # it nor its credentials are in a layer.
   - name: Build the image

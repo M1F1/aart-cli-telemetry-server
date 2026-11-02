@@ -1,6 +1,7 @@
-"""Each image CI runs is pulled with credentials of its own, or with none: the registry signed in to
-is the one the image's name gives, as Docker reads it, and the password reaches Docker only on
-stdin, in a Docker configuration that exists for that one pull.
+"""Each image CI runs is pulled, and the image it publishes pushed, with credentials of its own or
+with none: the registry signed in to is the one the image's name gives, as Docker reads it, and the
+password reaches Docker only on stdin, in a Docker configuration that exists for that one pull or
+push, so nothing of it is left in the runner's own.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from scripts.pull_image import pull, registry
+from scripts.registry_image import main, pull, push, registry
 
 from .credential_fixtures import held
 
@@ -146,3 +147,72 @@ def test_half_a_pair_is_refused_before_docker_is_asked(username: str, password: 
     with pytest.raises(SystemExit, match="both"):
         pull("mirror.example/postgres:16", username, password, run=docker)
     assert docker.calls == []
+
+
+TAGS = ("registry.example/team/server:sha-0123456789ab", "registry.example/team/server:main")
+
+
+def test_without_credentials_the_image_is_pushed_as_the_runner_is_signed_in() -> None:
+    docker = Docker()
+    push(TAGS, "", "", run=docker)
+    assert [call["argv"] for call in docker.calls] == [["docker", "push", tag] for tag in TAGS]
+    assert {call["config"] for call in docker.calls} == {None}
+
+
+def test_a_push_signs_in_once_in_a_configuration_of_its_own_that_is_then_removed() -> None:
+    docker = Docker()
+    push(TAGS, "publisher", PASSWORD, run=docker)
+    login, *pushed = docker.calls
+    assert login["argv"] == [
+        "docker", "login", "registry.example", "--username", "publisher", "--password-stdin"
+    ]  # fmt: skip
+    assert login["input"] == PASSWORD
+    assert [call["argv"] for call in pushed] == [["docker", "push", tag] for tag in TAGS]
+    assert {call["config"] for call in docker.calls} == {login["config"]}
+    assert login["config"] != os.environ.get("DOCKER_CONFIG")
+    assert all(call["config_existed"] for call in docker.calls)
+    assert all(PASSWORD not in " ".join(call["argv"]) for call in docker.calls)
+    assert not Path(login["config"]).exists()
+
+
+def test_a_failed_push_leaves_no_configuration() -> None:
+    docker = Docker(refuse="push")
+    with pytest.raises(subprocess.CalledProcessError):
+        push(TAGS, "publisher", PASSWORD, run=docker)
+    assert [call["argv"][1] for call in docker.calls] == ["login", "push"]
+    assert not Path(docker.calls[0]["config"]).exists()
+
+
+def test_tags_in_more_than_one_registry_are_refused_before_docker_is_asked() -> None:
+    docker = Docker()
+    with pytest.raises(SystemExit, match="one registry"):
+        push((TAGS[0], "other.example/team/server:main"), "publisher", PASSWORD, run=docker)
+    with pytest.raises(SystemExit, match="one registry"):
+        push((), "publisher", PASSWORD, run=docker)
+    assert docker.calls == []
+
+
+@pytest.mark.parametrize(("username", "password"), [("publisher", ""), ("", PASSWORD)])
+def test_half_a_pair_is_refused_before_a_push_too(username: str, password: str) -> None:
+    docker = Docker()
+    with pytest.raises(SystemExit, match="both"):
+        push(TAGS, username, password, run=docker)
+    assert docker.calls == []
+
+
+def test_the_command_reads_the_pair_by_its_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    docker = Docker()
+    monkeypatch.setenv("PUBLISH_USERNAME", "publisher")
+    monkeypatch.setenv("PUBLISH_PASSWORD", PASSWORD)
+    monkeypatch.setenv("FETCH_USERNAME", "")
+    monkeypatch.delenv("FETCH_PASSWORD", raising=False)
+    main(["push", "PUBLISH", *TAGS], run=docker)
+    main(["pull", "FETCH", "python:3.13"], run=docker)
+    assert [call["argv"][1:3] for call in docker.calls] == [
+        ["login", "registry.example"],
+        ["push", TAGS[0]],
+        ["push", TAGS[1]],
+        ["pull", "python:3.13"],
+    ]
+    with pytest.raises(SystemExit):
+        main(["publish", "PUBLISH", *TAGS], run=docker)
