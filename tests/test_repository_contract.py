@@ -28,6 +28,7 @@ from aart_cli_telemetry_server.adapters.sql import (
     SCHEMA_VERSION,
     SqlEventRepository,
     events,
+    failures,
     open_repository,
     sqlite_url,
 )
@@ -51,6 +52,7 @@ def _value(result: IOResult[_T, StorageError]) -> _T:
 def _sql(url: str) -> SqlEventRepository:
     repository = _value(open_repository(url))
     with repository.engine.begin() as connection:
+        connection.execute(delete(failures))
         connection.execute(delete(events))
     return repository
 
@@ -84,6 +86,8 @@ def _same_numbers(repository: EventRepository, oracle: EventRepository, days: in
         lambda r: r.top_artifacts(period, stats.MAX_TOP),
         lambda r: r.top_unmanaged(period, 5),
         lambda r: r.top_unmanaged(period, stats.MAX_TOP),
+        lambda r: r.top_failures(period, 3),
+        lambda r: r.top_failures(period, stats.MAX_TOP),
     )
     for read in reads:
         assert _value(read(repository)) == _value(read(oracle))
@@ -126,7 +130,9 @@ def test_nothing_to_add_and_ping(make: Callable[[], EventRepository]) -> None:
     repository = make()
     assert repository.add([]) == IOSuccess(None)
     assert repository.ping() == IOSuccess(None)
-    assert _value(repository.summary(stats.window(1, NOW))) == stats.Summary(0, 0, 0, 0, 0, 0, 0, 0)
+    assert _value(repository.summary(stats.window(1, NOW))) == stats.Summary(
+        0, 0, 0, 0, 0, 0, 0, 0, 0
+    )
 
 
 # -- SQLite on disk --------------------------------------------------------------------------------
@@ -197,6 +203,7 @@ def test_a_failing_database_is_a_value_not_an_exception(
         repository.daily(period),
         repository.by_source(period),
         repository.top_artifacts(period, 3),
+        repository.top_failures(period, 3),
     ):
         assert perform(result).failure() == StorageError("OperationalError")
 

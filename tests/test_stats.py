@@ -96,6 +96,7 @@ def test_installs_and_uses_are_counted_apart() -> None:
         using_clients=2,
         used_artifacts=2,
         unmanaged_uses=0,
+        failures=0,
     )
     top = stats.top_artifacts(history, WEEK, 10)
     assert [(item.artifact_id, item.uses, item.clients, item.installs) for item in top] == [

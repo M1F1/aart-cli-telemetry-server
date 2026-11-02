@@ -28,6 +28,7 @@ _PURE_STDLIB = {
     "dataclasses",
     "datetime",
     "enum",
+    "hashlib",
     "json",
     "re",
     "typing",

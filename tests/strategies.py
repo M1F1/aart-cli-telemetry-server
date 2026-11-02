@@ -12,8 +12,10 @@ from aart_cli_telemetry_server.domain.events import (
     SOURCES_FOR,
     Event,
     EventType,
+    Failure,
     Source,
     StoredEvent,
+    fingerprint,
 )
 
 #: The moment every generated history ends at; a test's clock reads this.
@@ -28,9 +30,67 @@ moments = st.integers(0, 40 * 24 * 3600 * 1_000_000).map(
 )
 
 
+#: Few enough that one defect recurs, with other lines, versions and platforms.
+_FRAMES = (
+    "aart_cli.cli:main",
+    "aart_cli.commands.marketplace:_update",
+    "aart_cli.io.receipt_store:installations",
+    "aart_cli:<module>",
+)
+
+
 @st.composite
-def events(draw: st.DrawFn, ids: st.SearchStrategy[str] = uuids) -> Event:
+def failed(
+    draw: st.DrawFn, ids: st.SearchStrategy[str] = uuids, *, recurring: bool = False
+) -> Event:
+    """A failure the contract allows; `recurring` ones are a few defects at varying lines, so a
+    history holds the same defect more than once."""
+
+    kind = draw(st.sampled_from(("crash", "error", "interrupted")))
+    places = st.sampled_from(("consume.update", "tui", "usage-hook"))
+    if not recurring:
+        places |= st.from_regex(r"[a-z0-9][a-z0-9._-]{0,20}", fullmatch=True)
+    place = draw(places)
+    named = st.sampled_from(("KeyError", "aart_cli.domain.Refused", "_Private"))
+    if recurring:
+        exception = "KeyError" if kind == "crash" else None
+        shape: tuple[str, ...] = _FRAMES[:2]
+        codes: tuple[str, ...] = ()
+    else:
+        exception = draw(named if kind == "crash" else st.none() | named)
+        shape = tuple(draw(st.lists(st.sampled_from(_FRAMES), max_size=3)))
+        codes = tuple(
+            draw(st.lists(st.sampled_from(("registry-unreachable", "a.b-1", "0")), unique=True))
+        )
+    frames = tuple(f"{frame}:{draw(st.integers(0, 999999))}" for frame in shape)
+    diagnostics = codes
+    return Event(
+        event_id=draw(ids),
+        occurred_at=draw(moments),
+        event_type=EventType.FAILED,
+        source=Source.AART_CLI,
+        artifact_id=place,
+        artifact_type=kind,
+        artifact_version=None,
+        failure=Failure(
+            fingerprint=fingerprint(kind, place, exception, frames, diagnostics),
+            exception=exception,
+            frames=frames,
+            diagnostics=diagnostics,
+            exit_code=draw(st.none() | st.integers(0, 255)),
+            python=draw(st.sampled_from(("3.11.9", "3.12.4", "3.13.0rc1+"))),
+            platform=draw(st.sampled_from(("darwin", "linux", "other"))),
+        ),
+    )
+
+
+@st.composite
+def events(
+    draw: st.DrawFn, ids: st.SearchStrategy[str] = uuids, *, recurring: bool = False
+) -> Event:
     kind = draw(st.sampled_from(list(EventType)))
+    if kind is EventType.FAILED:
+        return draw(failed(ids, recurring=recurring))
     return Event(
         event_id=draw(ids),
         occurred_at=draw(moments),
@@ -47,9 +107,9 @@ def events(draw: st.DrawFn, ids: st.SearchStrategy[str] = uuids) -> Event:
 @st.composite
 def stored_events(draw: st.DrawFn) -> StoredEvent:
     return StoredEvent(
-        event=draw(events()),
+        event=draw(events(recurring=True)),
         client_id=draw(st.sampled_from(CLIENTS)),
-        client_version="0.22.0",
+        client_version=draw(st.sampled_from(("0.22.0", "0.24.0"))),
         received_at=NOW,
     )
 
@@ -98,6 +158,21 @@ def wire(event: Event) -> dict[str, Any]:
     }
     if event.artifact_version is not None:
         document["artifact_version"] = event.artifact_version
+    if event.failure is not None:
+        document["failure"] = failure_document(event.failure)
+    return document
+
+
+def failure_document(failure: Failure) -> dict[str, Any]:
+    document: dict[str, Any] = {"fingerprint": failure.fingerprint}
+    if failure.exception is not None:
+        document["exception"] = failure.exception
+    document["frames"] = list(failure.frames)
+    document["diagnostics"] = list(failure.diagnostics)
+    if failure.exit_code is not None:
+        document["exit_code"] = failure.exit_code
+    document["python"] = failure.python
+    document["platform"] = failure.platform
     return document
 
 
@@ -117,6 +192,8 @@ __all__ = [
     "NOW",
     "Source",
     "events",
+    "failed",
+    "failure_document",
     "histories",
     "numbered",
     "request",

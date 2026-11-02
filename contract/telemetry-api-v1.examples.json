@@ -80,6 +80,69 @@
           }
         ]
       }
+    },
+    {
+      "name": "failures aart-cli met: a crash, an error and an interruption",
+      "request": {
+        "schema_version": 1,
+        "client_id": "0b6f4d1e-8f8a-4a43-9a52-2f0f5d0f6a11",
+        "client_version": "0.24.0",
+        "events": [
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0006",
+            "occurred_at": "2026-11-02T09:00:00Z",
+            "event_type": "aart_cli.failed",
+            "source": "aart_cli",
+            "artifact_id": "consume.update",
+            "artifact_type": "crash",
+            "failure": {
+              "fingerprint": "2ffcacfa0fb53a5d",
+              "exception": "KeyError",
+              "frames": [
+                "aart_cli.cli:main:362",
+                "aart_cli.commands.marketplace:_update:1203",
+                "aart_cli.io.receipt_store:installations:88"
+              ],
+              "diagnostics": [],
+              "python": "3.11.9",
+              "platform": "darwin"
+            }
+          },
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0007",
+            "occurred_at": "2026-11-02T09:01:00Z",
+            "event_type": "aart_cli.failed",
+            "source": "aart_cli",
+            "artifact_id": "consume.install",
+            "artifact_type": "error",
+            "failure": {
+              "fingerprint": "ba98b9eadd977fcd",
+              "frames": [],
+              "diagnostics": [
+                "registry-unreachable"
+              ],
+              "exit_code": 3,
+              "python": "3.12.4",
+              "platform": "linux"
+            }
+          },
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0008",
+            "occurred_at": "2026-11-02T09:02:00Z",
+            "event_type": "aart_cli.failed",
+            "source": "aart_cli",
+            "artifact_id": "tui",
+            "artifact_type": "interrupted",
+            "failure": {
+              "fingerprint": "eabfd0b1d24ed2bc",
+              "frames": [],
+              "diagnostics": [],
+              "python": "3.11.9",
+              "platform": "other"
+            }
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -191,6 +254,160 @@
         "artifact_id": "brainstorming",
         "artifact_type": "skill",
         "artifact_version": "1.0.0"
+      }
+    },
+    {
+      "name": "a failure without its failure",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000010",
+        "occurred_at": "2026-11-02T09:00:00Z",
+        "event_type": "aart_cli.failed",
+        "source": "aart_cli",
+        "artifact_id": "consume.update",
+        "artifact_type": "crash"
+      }
+    },
+    {
+      "name": "a failure with a fingerprint that is not its own",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000011",
+        "occurred_at": "2026-11-02T09:00:00Z",
+        "event_type": "aart_cli.failed",
+        "source": "aart_cli",
+        "artifact_id": "consume.update",
+        "artifact_type": "crash",
+        "failure": {
+          "fingerprint": "0000000000000000",
+          "exception": "KeyError",
+          "frames": [
+            "aart_cli.cli:main:362",
+            "aart_cli.commands.marketplace:_update:1203",
+            "aart_cli.io.receipt_store:installations:88"
+          ],
+          "diagnostics": [],
+          "python": "3.11.9",
+          "platform": "darwin"
+        }
+      }
+    },
+    {
+      "name": "a failure that names a frame outside aart-cli",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000012",
+        "occurred_at": "2026-11-02T09:00:00Z",
+        "event_type": "aart_cli.failed",
+        "source": "aart_cli",
+        "artifact_id": "consume.update",
+        "artifact_type": "crash",
+        "failure": {
+          "fingerprint": "151f04dc300c45b6",
+          "exception": "KeyError",
+          "frames": [
+            "json.decoder:decode:337"
+          ],
+          "diagnostics": [],
+          "python": "3.11.9",
+          "platform": "darwin"
+        }
+      }
+    },
+    {
+      "name": "a failure that carries a message",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000013",
+        "occurred_at": "2026-11-02T09:00:00Z",
+        "event_type": "aart_cli.failed",
+        "source": "aart_cli",
+        "artifact_id": "consume.update",
+        "artifact_type": "crash",
+        "failure": {
+          "fingerprint": "2ffcacfa0fb53a5d",
+          "exception": "KeyError",
+          "frames": [
+            "aart_cli.cli:main:362",
+            "aart_cli.commands.marketplace:_update:1203",
+            "aart_cli.io.receipt_store:installations:88"
+          ],
+          "diagnostics": [],
+          "python": "3.11.9",
+          "platform": "darwin",
+          "message": "no such file /Users/someone/project"
+        }
+      }
+    },
+    {
+      "name": "a crash without its exception",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000014",
+        "occurred_at": "2026-11-02T09:00:00Z",
+        "event_type": "aart_cli.failed",
+        "source": "aart_cli",
+        "artifact_id": "consume.update",
+        "artifact_type": "crash",
+        "failure": {
+          "fingerprint": "91748e70f06fa64d",
+          "frames": [
+            "aart_cli.cli:main:362",
+            "aart_cli.commands.marketplace:_update:1203",
+            "aart_cli.io.receipt_store:installations:88"
+          ],
+          "diagnostics": [],
+          "python": "3.11.9",
+          "platform": "darwin"
+        }
+      }
+    },
+    {
+      "name": "a use that carries a failure",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000015",
+        "occurred_at": "2026-11-02T09:00:00Z",
+        "event_type": "artifact.used",
+        "source": "claude_hook",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill",
+        "failure": {
+          "fingerprint": "2ffcacfa0fb53a5d",
+          "exception": "KeyError",
+          "frames": [
+            "aart_cli.cli:main:362",
+            "aart_cli.commands.marketplace:_update:1203",
+            "aart_cli.io.receipt_store:installations:88"
+          ],
+          "diagnostics": [],
+          "python": "3.11.9",
+          "platform": "darwin"
+        }
+      }
+    },
+    {
+      "name": "a failure from a harness hook",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000016",
+        "occurred_at": "2026-11-02T09:00:00Z",
+        "event_type": "aart_cli.failed",
+        "source": "claude_hook",
+        "artifact_id": "consume.update",
+        "artifact_type": "crash",
+        "failure": {
+          "fingerprint": "2ffcacfa0fb53a5d",
+          "exception": "KeyError",
+          "frames": [
+            "aart_cli.cli:main:362",
+            "aart_cli.commands.marketplace:_update:1203",
+            "aart_cli.io.receipt_store:installations:88"
+          ],
+          "diagnostics": [],
+          "python": "3.11.9",
+          "platform": "darwin"
+        }
       }
     }
   ]

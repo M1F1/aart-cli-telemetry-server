@@ -13,6 +13,7 @@ from aart_cli_telemetry_server.domain.events import StoredEvent
 from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
     DailyCount,
+    FailureUsage,
     SourceUsage,
     Summary,
     UnmanagedUsage,
@@ -53,6 +54,10 @@ class EventRepository(Protocol):
     def top_unmanaged(
         self, period: Window, limit: int
     ) -> IOResult[tuple[UnmanagedUsage, ...], StorageError]: ...
+
+    def top_failures(
+        self, period: Window, limit: int
+    ) -> IOResult[tuple[FailureUsage, ...], StorageError]: ...
 
     def daily(self, period: Window) -> IOResult[tuple[DailyCount, ...], StorageError]: ...
 

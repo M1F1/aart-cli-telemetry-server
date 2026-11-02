@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
 
 __all__ = [
+    "FAILURE_KINDS",
     "SOURCES_FOR",
     "Batch",
     "Event",
     "EventType",
+    "Failure",
     "Source",
     "StoredEvent",
     "acknowledged",
+    "fingerprint",
     "stamp",
     "stored_events",
 ]
@@ -27,6 +32,8 @@ class EventType(StrEnum):
     USED = "artifact.used"
     #: A use of a skill or MCP no artifact aart-cli installed answers to, by the harness's name.
     UNMANAGED_USED = "unmanaged.used"
+    #: A failure aart-cli met: its kind is the artifact_type, where it happened the artifact_id.
+    FAILED = "aart_cli.failed"
 
 
 class Source(StrEnum):
@@ -42,7 +49,43 @@ SOURCES_FOR: Mapping[EventType, frozenset[Source]] = {
     EventType.REMOVED: frozenset({Source.AART_CLI}),
     EventType.USED: frozenset({Source.CLAUDE_HOOK, Source.OPENCODE_PLUGIN}),
     EventType.UNMANAGED_USED: frozenset({Source.CLAUDE_HOOK, Source.OPENCODE_PLUGIN}),
+    EventType.FAILED: frozenset({Source.AART_CLI}),
 }
+
+#: What an `aart_cli.failed` event's artifact_type may be.
+FAILURE_KINDS = frozenset({"crash", "error", "interrupted"})
+
+
+def fingerprint(
+    kind: str, place: str, exception: str | None, frames: Sequence[str], diagnostics: Sequence[str]
+) -> str:
+    """What names a defect: the first 16 hex digits of the SHA-256 of the compact JSON array
+    `[kind, place, exception or "", frames without their line, diagnostics]`."""
+
+    body = json.dumps(
+        [
+            kind,
+            place,
+            exception or "",
+            [frame.rsplit(":", 1)[0] for frame in frames],
+            list(diagnostics),
+        ],
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+
+@dataclass(frozen=True, slots=True)
+class Failure:
+    """What an `aart_cli.failed` event carries besides its kind and place."""
+
+    fingerprint: str
+    exception: str | None
+    frames: tuple[str, ...]
+    diagnostics: tuple[str, ...]
+    exit_code: int | None
+    python: str
+    platform: str
 
 
 def _utc(moment: datetime) -> None:
@@ -61,6 +104,7 @@ class Event:
     artifact_id: str
     artifact_type: str
     artifact_version: str | None
+    failure: Failure | None = None
 
     def __post_init__(self) -> None:
         _utc(self.occurred_at)
@@ -68,6 +112,13 @@ class Event:
             raise ValueError("this source cannot report this event type")
         if self.event_type is EventType.UNMANAGED_USED and self.artifact_version is not None:
             raise ValueError("an unmanaged use has no version")
+        failed = self.event_type is EventType.FAILED
+        if failed != (self.failure is not None):
+            raise ValueError("a failure is carried by an aart_cli.failed event and no other")
+        if failed and (
+            self.artifact_version is not None or self.artifact_type not in FAILURE_KINDS
+        ):
+            raise ValueError("a failure has a kind and no version")
 
 
 @dataclass(frozen=True, slots=True)

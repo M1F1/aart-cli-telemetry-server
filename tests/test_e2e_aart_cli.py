@@ -6,7 +6,9 @@ telemetry on in a throwaway `AART_CLI_HOME`, puts lifecycle events in aart-cli's
 a completed install does, sends them with `aart-cli consume telemetry sync`, sends them again, and
 reads them back from this server's database once each. A second test keeps a use of an MCP no
 artifact answers to, sends it as `unmanaged.used`, and after `consume telemetry unmanaged off` sends
-the next one no more. Nothing touches the real home: HOME and AART_CLI_HOME are temporary
+the next one no more. A third has aart-cli fail -- a command that ends in an error, and a crash in
+its own code -- sends both as `aart_cli.failed`, and after `consume telemetry errors off` sends the
+next one no more. Nothing touches the real home: HOME and AART_CLI_HOME are temporary
 directories; PYTHONPATH is passed on, so it can name an aart-cli checkout.
 """
 
@@ -63,6 +65,19 @@ from aart_cli.io.telemetry_store import TelemetryOutbox
 
 use = ArtifactUse("claude", UsageKind.MCP, "context7")
 print(TelemetryOutbox(sys.argv[1] + "/state").record_use(use, "2026-10-29T17:00:00Z", sys.argv[2]))
+"""
+
+
+_CRASH = """
+import sys
+from aart_cli.domain.failures import FailureKind
+from aart_cli.domain.telemetry import contract_moment
+from aart_cli.io.failure_journal import record_failure
+
+try:
+    contract_moment("not a moment")
+except Exception as error:
+    print(record_failure(sys.argv[1], FailureKind.CRASH, "e2e.crash", error=error, sync=False))
 """
 
 
@@ -160,3 +175,52 @@ def test_a_use_aart_cli_did_not_install_is_sent_until_the_person_turns_it_off(
     assert (summary.uses, summary.unmanaged_uses) == (0, 1)
     (tool,) = perform(repository.top_unmanaged(period, 10)).unwrap()
     assert (tool.artifact_type, tool.artifact_id, tool.uses) == ("mcp", "context7", 1)
+
+
+def _settled(environment: dict[str, str], **expected: int) -> dict[str, int]:
+    """The journal once it holds `expected`: a failure may start a sync of its own."""
+
+    deadline = time.monotonic() + 20
+    while True:
+        journal = _telemetry(environment, "status")["journal"]
+        assert isinstance(journal, dict)
+        if all(journal[key] == value for key, value in expected.items()):
+            return journal
+        assert time.monotonic() < deadline, journal
+        _telemetry(environment, "sync", "--force")
+        time.sleep(0.2)
+
+
+def test_a_failure_aart_cli_met_is_sent_until_the_person_turns_it_off(
+    served: tuple[str, SqlEventRepository], tmp_path: Path
+) -> None:
+    url, repository = served
+    home = tmp_path / "home"
+    environment = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(tmp_path / "user"),
+        "AART_CLI_HOME": str(home),
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+    }
+    assert _telemetry(environment, "enable", "--endpoint", url)["ok"] is True
+    assert _telemetry(environment, "status")["errors"] == {"sent": True, "chosen": False}
+
+    refused = _run(environment, "-m", "aart_cli", "consume", "report", "--limit", "0")
+    assert refused.returncode != 0
+    assert _run(environment, "-c", _CRASH, str(home)).stdout == b"True\n"
+    _settled(environment, waiting=0, sent=2)
+
+    period = window(30, NOW)
+    assert perform(repository.summary(period)).unwrap().failures == 2
+    found = {item.place: item for item in perform(repository.top_failures(period, 10)).unwrap()}
+    assert set(found) == {"consume.report", "e2e.crash"}
+    assert (found["consume.report"].kind, found["consume.report"].exception) == ("error", None)
+    crash = found["e2e.crash"]
+    assert (crash.kind, crash.exception, crash.occurrences) == ("crash", "AttributeError", 1)
+    assert crash.frames
+    assert all(frame.startswith("aart_cli.") for frame in crash.frames)
+
+    assert _telemetry(environment, "errors", "off")["ok"] is True
+    assert _run(environment, "-c", _CRASH, str(home)).stdout == b"True\n"
+    _settled(environment, waiting=0, sent=2, skipped=1)
+    assert perform(repository.summary(period)).unwrap().failures == 2

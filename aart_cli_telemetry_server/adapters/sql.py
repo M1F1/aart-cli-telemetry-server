@@ -7,11 +7,13 @@ What only SQLite has -- the file's mode, WAL and the online backup -- is set apa
 only when the URL is SQLite's.
 
 A database this server did not create, or created at another schema version, is refused and left
-exactly as it is.
+exactly as it is. A table schema version 1 gained later -- `failure`, for `aart_cli.failed` -- is
+created in a version-1 database that does not have it yet, and nothing else in it changes.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from collections.abc import Callable, Sequence
@@ -26,11 +28,13 @@ from sqlalchemy import (
     DateTime,
     Dialect,
     Engine,
+    ForeignKey,
     Index,
     Integer,
     MetaData,
     String,
     Table,
+    Text,
     case,
     create_engine,
     distinct,
@@ -45,10 +49,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.types import TypeDecorator
 
 from aart_cli_telemetry_server.application.ports import StorageError
-from aart_cli_telemetry_server.domain.events import Event, EventType, Source, StoredEvent
+from aart_cli_telemetry_server.domain.events import (
+    Event,
+    EventType,
+    Failure,
+    Source,
+    StoredEvent,
+)
 from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
     DailyCount,
+    FailureUsage,
     SourceUsage,
     Summary,
     UnmanagedUsage,
@@ -59,6 +70,7 @@ __all__ = [
     "DATABASE",
     "SCHEMA_VERSION",
     "SqlEventRepository",
+    "failures",
     "open_repository",
     "sqlite_url",
 ]
@@ -108,6 +120,21 @@ events = Table(
     Column("artifact_version", String(64), nullable=True),
     Index("event_moment", "occurred_at"),
     Index("event_artifact", "event_type", "artifact_type", "artifact_id"),
+)
+
+#: What an `aart_cli.failed` event carries besides its kind and place, which are the event's.
+failures = Table(
+    "failure",
+    metadata,
+    Column("event_id", String(36), ForeignKey("event.event_id"), primary_key=True),
+    Column("fingerprint", String(16), nullable=False),
+    Column("exception", String(128), nullable=True),
+    Column("frames", Text(), nullable=False),
+    Column("diagnostics", Text(), nullable=False),
+    Column("exit_code", Integer(), nullable=True),
+    Column("python", String(32), nullable=False),
+    Column("platform", String(8), nullable=False),
+    Index("failure_fingerprint", "fingerprint"),
 )
 
 
@@ -172,6 +199,7 @@ class SqlEventRepository:
 
     def add(self, stored: Sequence[StoredEvent]) -> IOResult[None, StorageError]:
         rows = [_row(item) for item in stored]
+        failed = [_failure_row(item) for item in stored if item.event.failure is not None]
         dialect = self._engine.dialect.name
         insert = postgresql.insert if dialect == "postgresql" else sqlite.insert
 
@@ -182,6 +210,14 @@ class SqlEventRepository:
                 connection.execute(
                     insert(events).on_conflict_do_nothing(index_elements=["event_id"]), rows
                 )
+                # An id kept before keeps its event; a failure row is read only with an
+                # aart_cli.failed event of the same id, so one written beside another kind of
+                # event is never counted.
+                if failed:
+                    connection.execute(
+                        insert(failures).on_conflict_do_nothing(index_elements=["event_id"]),
+                        failed,
+                    )
 
         return _guarded(write)
 
@@ -214,6 +250,7 @@ class SqlEventRepository:
                 distinct(case((used, events.c.artifact_type + "\x1f" + events.c.artifact_id)))
             ),
             _count(EventType.UNMANAGED_USED),
+            _count(EventType.FAILED),
         ).where(events.c.occurred_at >= period.since)
         return self._rows(statement).map(lambda rows: Summary(*(int(n or 0) for n in rows[0])))
 
@@ -303,6 +340,52 @@ class SqlEventRepository:
                 for kind, name, n, clients, last in rows
             )
         )
+
+    def top_failures(
+        self, period: Window, limit: int
+    ) -> IOResult[tuple[FailureUsage, ...], StorageError]:
+        joined = failures.join(events, events.c.event_id == failures.c.event_id)
+        held = (events.c.occurred_at >= period.since) & (
+            events.c.event_type == EventType.FAILED.value
+        )
+        occurrences = func.count().label("occurrences")
+        last = func.max(events.c.occurred_at).label("last_seen")
+        ranked = (
+            select(failures.c.fingerprint, occurrences, last)
+            .select_from(joined)
+            .where(held)
+            .group_by(failures.c.fingerprint)
+            .order_by(occurrences.desc(), last.desc(), self._by_name(failures.c.fingerprint))
+            .limit(limit)
+        )
+
+        def read() -> tuple[FailureUsage, ...]:
+            with self._engine.connect() as connection:
+                names = [str(row[0]) for row in connection.execute(ranked).all()]
+                if not names:
+                    return ()
+                rows = connection.execute(
+                    select(
+                        failures.c.fingerprint,
+                        events.c.event_id,
+                        events.c.occurred_at,
+                        events.c.client_id,
+                        events.c.client_version,
+                        events.c.artifact_type,
+                        events.c.artifact_id,
+                        failures.c.exception,
+                        failures.c.frames,
+                        failures.c.diagnostics,
+                        failures.c.platform,
+                    )
+                    .select_from(joined)
+                    .where(held & failures.c.fingerprint.in_(names))
+                ).all()
+            return tuple(
+                _failure_usage(name, [row for row in rows if row[0] == name]) for name in names
+            )
+
+        return _guarded(read)
 
     def daily(self, period: Window) -> IOResult[tuple[DailyCount, ...], StorageError]:
         statement = (
@@ -394,6 +477,42 @@ def _row(stored: StoredEvent) -> dict[str, object]:
     }
 
 
+def _failure_row(stored: StoredEvent) -> dict[str, object]:
+    failure: Failure | None = stored.event.failure
+    if failure is None:
+        raise ValueError("only an aart_cli.failed event has a failure row")
+    return {
+        "event_id": stored.event_id,
+        "fingerprint": failure.fingerprint,
+        "exception": failure.exception,
+        "frames": json.dumps(list(failure.frames)),
+        "diagnostics": json.dumps(list(failure.diagnostics)),
+        "exit_code": failure.exit_code,
+        "python": failure.python,
+        "platform": failure.platform,
+    }
+
+
+def _failure_usage(name: str, rows: list[Any]) -> FailureUsage:
+    """One defect from the rows of its occurrences, as `domain.stats.top_failures` defines it."""
+
+    latest = max(rows, key=lambda row: (_aware(row[2]), row[1]))
+    return FailureUsage(
+        fingerprint=name,
+        kind=latest[5],
+        place=latest[6],
+        exception=latest[7],
+        frames=tuple(json.loads(latest[8])),
+        diagnostics=tuple(json.loads(latest[9])),
+        occurrences=len(rows),
+        clients=len({row[3] for row in rows}),
+        versions=tuple(sorted({row[4] for row in rows})),
+        platforms=tuple(sorted({row[10] for row in rows})),
+        first_seen=min(_aware(row[2]) for row in rows),
+        last_seen=_aware(latest[2]),
+    )
+
+
 def _prepare(engine: Engine) -> None:
     """Create the schema in an empty database; refuse one at another version, changing nothing."""
 
@@ -411,6 +530,9 @@ def _prepare(engine: Engine) -> None:
         raise _Refused(
             f"this database has schema version {version}; this server reads {SCHEMA_VERSION}"
         )
+    if "failure" not in tables:
+        with engine.begin() as connection:
+            failures.create(connection)
 
 
 class _Refused(Exception):

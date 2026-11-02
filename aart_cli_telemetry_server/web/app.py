@@ -131,6 +131,7 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
                 "using_clients": found.using_clients,
                 "used_artifacts": found.used_artifacts,
                 "unmanaged_uses": found.unmanaged_uses,
+                "failures": found.failures,
             },
         )
 
@@ -171,6 +172,34 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
                         "uses": item.uses,
                         "clients": item.clients,
                         "last_used": stamp(item.last_used),
+                    }
+                    for item in found
+                ],
+            },
+        )
+
+    @app.get("/api/v1/stats/failures")
+    def top_failures(
+        days: int = days_query, limit: int = Query(default=20, ge=1, le=MAX_TOP)
+    ) -> Response:
+        return _answer(
+            use_cases.top_failures(days, limit, repository, clock),
+            lambda found: {
+                "days": days,
+                "failures": [
+                    {
+                        "fingerprint": item.fingerprint,
+                        "kind": item.kind,
+                        "place": item.place,
+                        "exception": item.exception,
+                        "frames": list(item.frames),
+                        "diagnostics": list(item.diagnostics),
+                        "occurrences": item.occurrences,
+                        "clients": item.clients,
+                        "versions": list(item.versions),
+                        "platforms": list(item.platforms),
+                        "first_seen": stamp(item.first_seen),
+                        "last_seen": stamp(item.last_seen),
                     }
                     for item in found
                 ],
