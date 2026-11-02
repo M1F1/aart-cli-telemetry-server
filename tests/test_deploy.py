@@ -27,7 +27,7 @@ from aart_cli_telemetry_server.web.app import create_app
 from deploy import Refused, Step, apply, describe, plan_for, read_environment, settings_for, smoke
 from deploy.targets import docker
 
-from .credential_fixtures import credential_url
+from .credential_fixtures import assignment, credential_url, held
 from .strategies import NOW
 
 _SAFE_KEYS = st.from_regex(r"[A-Z][A-Z0-9_]{0,15}", fullmatch=True).filter(
@@ -241,7 +241,7 @@ def test_without_apply_the_plan_is_printed_and_nothing_runs(
     [
         (["--target", "nowhere"], "IMAGE=i\n", "no target nowhere; known: "),
         (["--target", "docker"], None, "the environment file cannot be read"),
-        (["--target", "docker"], "IMAGE=i\nAPI_TOKEN=abcdefabcdef1234\n", "names a secret"),
+        (["--target", "docker"], f"IMAGE=i\n{assignment('API_TOKEN', held())}\n", "names a secret"),
     ],
 )
 def test_what_cannot_be_planned_is_refused_without_a_value(

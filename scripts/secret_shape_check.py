@@ -38,8 +38,17 @@ _KEY_WORDS = (
     "password|passwd|pwd|secret|token|credential"
     "|api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key"
 )
+# A key word starts a word or ends a name, as in `API_TOKEN` or `client_secret`; one that goes on,
+# as in `PASSWORD_SECRET_NAME`, names where a secret is kept rather than holding one.
+_KEY_START = r"(?:\b|(?<=_))"
 _KV_RE = re.compile(
-    r"(?i)\b(" + _KEY_WORDS + r")\b[\"']?\s*[" + _COLON + r"=]\s*[\"'][^\"']{2,}[\"']"
+    r"(?i)"
+    + _KEY_START
+    + r"("
+    + _KEY_WORDS
+    + r")\b[\"']?\s*["
+    + _COLON
+    + r"=]\s*[\"'][^\"']{2,}[\"']"
 )
 
 # The prefixes GitHub issues tokens under, matched as a scanner matches them: by prefix and length.
@@ -50,7 +59,7 @@ _TOKEN_RE = re.compile(r"\b(" + "|".join(_TOKEN_PREFIXES) + r")_[A-Za-z0-9_]{20,
 # span: outside one, the same text is an ordinary keyword argument or assignment in code.
 _SPAN_RE = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'|`[^`\n]*`")
 _UNQUOTED_RE = re.compile(
-    r"(?i)\b(" + _KEY_WORDS + r")\b\s*" + r"=" + r"\s*([^\s\"'`,;)}\]&$\\]{4,})"
+    r"(?i)" + _KEY_START + r"(" + _KEY_WORDS + r")\b\s*" + r"=" + r"\s*([^\s\"'`,;)}\]&$\\]{4,})"
 )
 # A value opening with one of these is a placeholder or an expansion, not a credential.
 _PLACEHOLDER_STARTS = ("[", "{", "<", "%")
