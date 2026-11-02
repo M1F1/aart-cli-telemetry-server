@@ -140,9 +140,28 @@ def test_stats_separate_installs_from_uses(client: TestClient) -> None:
             "updates": 0,
             "removals": 1,
             "active_clients": 1,
+            "automated_clients": 0,
         }
     ]
     assert sources == [{"source": "opencode_plugin", "artifact_type": "mcp", "uses": 1}]
+
+
+def test_automation_is_counted_apart_from_people_and_keeps_what_it_first_said(
+    client: TestClient,
+) -> None:
+    automated = _request(index=4)
+    assert automated["automated"] is True
+    client.post(BATCH, json=_request())
+    client.post(BATCH, json=automated)
+    automated["automated"] = False
+    assert client.post(BATCH, json=automated).status_code == 200
+
+    summary = client.get("/api/v1/stats/summary").json()
+    assert (summary["active_clients"], summary["using_clients"]) == (1, 1)
+    assert summary["automated_clients"] == 1
+    assert summary["uses"] == 2
+    (day,) = client.get("/api/v1/stats/daily").json()["daily"]
+    assert (day["active_clients"], day["automated_clients"]) == (1, 1)
 
 
 def test_uses_of_tools_aart_cli_did_not_install_have_their_own_list(client: TestClient) -> None:

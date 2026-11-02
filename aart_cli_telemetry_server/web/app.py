@@ -132,6 +132,7 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
                 "used_artifacts": found.used_artifacts,
                 "unmanaged_uses": found.unmanaged_uses,
                 "failures": found.failures,
+                "automated_clients": found.automated_clients,
             },
         )
 
@@ -220,6 +221,7 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
                         "updates": item.updates,
                         "removals": item.removals,
                         "active_clients": item.active_clients,
+                        "automated_clients": item.automated_clients,
                     }
                     for item in found
                 ],

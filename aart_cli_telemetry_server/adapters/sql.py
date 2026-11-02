@@ -7,8 +7,9 @@ What only SQLite has -- the file's mode, WAL and the online backup -- is set apa
 only when the URL is SQLite's.
 
 A database this server did not create, or created at another schema version, is refused and left
-exactly as it is. A table schema version 1 gained later -- `failure`, for `aart_cli.failed` -- is
-created in a version-1 database that does not have it yet, and nothing else in it changes. Servers
+exactly as it is. A table schema version 1 gained later -- `failure`, for `aart_cli.failed`, and
+`automation`, for events sent as automation -- is created in a version-1 database that does not
+have it yet, and nothing else in it changes. Servers
 starting together on one database check and create the schema one at a time, and a connection the
 database dropped -- a restart, a failover, an idle timeout -- is replaced before it is used.
 """
@@ -43,6 +44,7 @@ from sqlalchemy import (
     create_engine,
     distinct,
     event,
+    exists,
     func,
     inspect,
     select,
@@ -74,6 +76,7 @@ __all__ = [
     "DATABASE",
     "SCHEMA_VERSION",
     "SqlEventRepository",
+    "automation",
     "failures",
     "open_repository",
     "sqlite_url",
@@ -144,6 +147,15 @@ failures = Table(
     Column("platform", String(8), nullable=False),
     Index("failure_fingerprint", "fingerprint"),
 )
+
+#: The events a request sent as automation, such as a CI job; every other event is a person's.
+automation = Table(
+    "automation",
+    metadata,
+    Column("event_id", String(36), ForeignKey("event.event_id"), primary_key=True),
+)
+#: Whether the event of the row at hand was sent as automation.
+_automated = exists().where(automation.c.event_id == events.c.event_id)
 
 
 def sqlite_url(data_dir: str) -> str:
@@ -222,6 +234,7 @@ class SqlEventRepository:
     def add(self, stored: Sequence[StoredEvent]) -> IOResult[None, StorageError]:
         rows = [_row(item) for item in stored]
         failed = [_failure_row(item) for item in stored if item.event.failure is not None]
+        automated = {item.event_id for item in stored if item.automated}
         dialect = self._engine.dialect.name
         insert = postgresql.insert if dialect == "postgresql" else sqlite.insert
 
@@ -229,9 +242,17 @@ class SqlEventRepository:
             if not rows:
                 return
             with self._engine.begin() as connection:
-                connection.execute(
-                    insert(events).on_conflict_do_nothing(index_elements=["event_id"]), rows
+                added: list[str] = list(
+                    connection.execute(
+                        insert(events)
+                        .on_conflict_do_nothing(index_elements=["event_id"])
+                        .returning(events.c.event_id),
+                        rows,
+                    ).scalars()
                 )
+                # Only an event this request added is marked: an id kept before keeps what the
+                # request that first sent it said.
+                marked = [{"event_id": name} for name in added if name in automated]
                 # An id kept before keeps its event; a failure row is read only with an
                 # aart_cli.failed event of the same id, so one written beside another kind of
                 # event is never counted.
@@ -240,6 +261,8 @@ class SqlEventRepository:
                         insert(failures).on_conflict_do_nothing(index_elements=["event_id"]),
                         failed,
                     )
+                if marked:
+                    connection.execute(automation.insert(), marked)
 
         return _guarded(write)
 
@@ -266,13 +289,14 @@ class SqlEventRepository:
             _count(EventType.INSTALLED),
             _count(EventType.UPDATED),
             _count(EventType.REMOVED),
-            func.count(distinct(events.c.client_id)),
-            func.count(distinct(case((used, events.c.client_id)))),
+            _clients(automated=False),
+            _clients(automated=False, held=used),
             func.count(
                 distinct(case((used, events.c.artifact_type + "\x1f" + events.c.artifact_id)))
             ),
             _count(EventType.UNMANAGED_USED),
             _count(EventType.FAILED),
+            _clients(automated=True),
         ).where(events.c.occurred_at >= period.since)
         return self._rows(statement).map(lambda rows: Summary(*(int(n or 0) for n in rows[0])))
 
@@ -417,7 +441,8 @@ class SqlEventRepository:
                 _count(EventType.INSTALLED),
                 _count(EventType.UPDATED),
                 _count(EventType.REMOVED),
-                func.count(distinct(events.c.client_id)),
+                _clients(automated=False),
+                _clients(automated=True),
             )
             .where(events.c.occurred_at >= period.since)
             .group_by(events.c.occurred_day)
@@ -472,6 +497,13 @@ class SqlEventRepository:
 
 def _count(kind: EventType) -> Any:
     return func.sum(case((events.c.event_type == kind.value, 1), else_=0))
+
+
+def _clients(*, automated: bool, held: Any = None) -> Any:
+    """The distinct installations among the events `held` that were, or were not, automation."""
+
+    sent = _automated if automated else ~_automated
+    return func.count(distinct(case((sent if held is None else sent & held, events.c.client_id))))
 
 
 def _aware(moment: datetime) -> datetime:
@@ -557,8 +589,9 @@ def _prepare(engine: Engine) -> None:
             raise _Refused(
                 f"this database has schema version {version}; this server reads {SCHEMA_VERSION}"
             )
-        if "failure" not in tables:
-            failures.create(connection)
+        for later in (failures, automation):
+            if later.name not in tables:
+                later.create(connection)
 
 
 def _one_at_a_time(connection: Connection) -> None:

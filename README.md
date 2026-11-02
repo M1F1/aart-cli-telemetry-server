@@ -8,7 +8,9 @@ Failures aart-cli met (`aart_cli.failed`: a crash, a command that ended in an er
 interruption) are grouped by fingerprint -- the defect, not its line numbers -- with how often, on
 how many installations, on which versions and platforms. A failure carries an exception's type
 name, aart-cli's own frames and diagnostic codes; never a message, an argument or a path. The
-server recomputes each fingerprint and refuses one that is not the failure's own.
+server recomputes each fingerprint and refuses one that is not the failure's own. An installation
+that runs as automation, such as a CI job, says so (`automated`), and the dashboard counts people's
+installations and automated ones apart, so fresh CI jobs do not read as new people.
 
 - **The contract** between aart-cli and this server is [`docs/telemetry-api-v1.md`](docs/telemetry-api-v1.md)
   with [`contract/telemetry-api-v1.examples.json`](contract/telemetry-api-v1.examples.json). Both
@@ -108,7 +110,7 @@ takes a consistent copy with SQLite's online backup while the server runs. For P
 | `POST /api/v1/events/batch` | The contract's ingest endpoint. |
 | `GET /healthz` | `{"status": "ok"}` when the database can be read. |
 | `GET /dashboard` | The dashboard. |
-| `GET /api/v1/stats/summary?days=30` | Uses, installs, updates, removals, active installations, uses of tools aart-cli did not install, failures aart-cli met. |
+| `GET /api/v1/stats/summary?days=30` | Uses, installs, updates, removals, people's and automated active installations, uses of tools aart-cli did not install, failures aart-cli met. |
 | `GET /api/v1/stats/top-artifacts?days=30&limit=20` | Artifacts by uses. |
 | `GET /api/v1/stats/top-unmanaged?days=30&limit=20` | Skills and MCPs aart-cli did not install, by uses (`unmanaged.used`). |
 | `GET /api/v1/stats/failures?days=30&limit=20` | Failures aart-cli met, by defect (`aart_cli.failed`): most frequent, then most recent, first. |

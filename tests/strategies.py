@@ -111,6 +111,7 @@ def stored_events(draw: st.DrawFn) -> StoredEvent:
         client_id=draw(st.sampled_from(CLIENTS)),
         client_version=draw(st.sampled_from(("0.22.0", "0.24.0"))),
         received_at=NOW,
+        automated=draw(st.booleans()),
     )
 
 

@@ -35,6 +35,7 @@ def _stored(
     client: str = CLIENTS[0],
     source: Source | None = None,
     event_id: str | None = None,
+    automated: bool = False,
 ) -> StoredEvent:
     used = kind in (EventType.USED, EventType.UNMANAGED_USED)
     chosen = source or (Source.CLAUDE_HOOK if used else Source.AART_CLI)
@@ -52,6 +53,7 @@ def _stored(
         client,
         "0.22.0",
         NOW,
+        automated,
     )
 
 
@@ -97,6 +99,7 @@ def test_installs_and_uses_are_counted_apart() -> None:
         used_artifacts=2,
         unmanaged_uses=0,
         failures=0,
+        automated_clients=0,
     )
     top = stats.top_artifacts(history, WEEK, 10)
     assert [(item.artifact_id, item.uses, item.clients, item.installs) for item in top] == [
@@ -232,3 +235,34 @@ def test_a_kept_event_remembers_the_client_and_version() -> None:
     batch = Batch(CLIENTS[1], "0.23.0", (_stored(EventType.USED).event,))
     (kept,) = stored_events(batch, NOW)
     assert (kept.client_id, kept.client_version, kept.received_at) == (CLIENTS[1], "0.23.0", NOW)
+    assert kept.automated is False
+    (automated,) = stored_events(Batch(CLIENTS[1], "0.23.0", batch.events, automated=True), NOW)
+    assert automated.automated is True
+
+
+def test_people_and_automation_are_counted_apart() -> None:
+    history = [
+        _stored(EventType.USED),
+        _stored(EventType.INSTALLED, client="3e9c7a4b-bbbd-4d76-8d85-5c3c8a3c9d44"),
+        _stored(EventType.INSTALLED, client=CLIENTS[1], automated=True),
+        _stored(EventType.USED, client=CLIENTS[2], automated=True),
+        _stored(EventType.USED, client=CLIENTS[2], automated=True, days_ago=1),
+    ]
+    summary = stats.summarise(history, WEEK)
+    assert (summary.active_clients, summary.using_clients, summary.automated_clients) == (2, 1, 2)
+    assert summary.uses == 3
+    assert [(day.active_clients, day.automated_clients) for day in stats.daily(history, WEEK)] == [
+        (0, 1),
+        (2, 2),
+    ]
+
+
+@given(history=histories)
+def test_every_installation_is_a_persons_or_automated_and_counted_as_each_it_was(
+    history: list[StoredEvent],
+) -> None:
+    summary = stats.summarise(history, WEEK)
+    held = [stored for stored in history if WEEK.holds(stored)]
+    people = {stored.client_id for stored in held if not stored.automated}
+    automated = {stored.client_id for stored in held if stored.automated}
+    assert (summary.active_clients, summary.automated_clients) == (len(people), len(automated))

@@ -204,6 +204,7 @@ class _RequestDocument(BaseModel):
     client_id: Uuid
     client_version: Annotated[str, StringConstraints(pattern=_VERSION)]
     events: Annotated[list[Any], Field(min_length=1, max_length=MAX_EVENTS)]
+    automated: bool = False
 
 
 _EVENTS = Annotated[list[_EventDocument], Field(min_length=1, max_length=MAX_EVENTS)]
@@ -235,12 +236,16 @@ class Refusal:
     rejected_events: tuple[RejectedEvent, ...] = ()
 
 
-_ENVELOPE = "the request must hold exactly schema_version, client_id, client_version and events"
+_ENVELOPE = (
+    "the request must hold exactly schema_version, client_id, client_version and events, "
+    "and may hold automated"
+)
 _ENVELOPE_REASONS = {
     "schema_version": "schema_version must be 1",
     "client_id": "client_id must be a lowercase UUID",
     "client_version": "client_version must be 1-64 characters of [0-9A-Za-z.+-]",
     "events": f"events must be a list of 1 to {MAX_EVENTS} events",
+    "automated": "automated must be true or false",
 }
 _EVENT_REASONS = {
     "event_id": "event_id must be a lowercase UUID",
@@ -342,5 +347,10 @@ def read_batch(raw: bytes) -> Result[Batch, Refusal]:
         return _refused(f"{len(rejected)} event(s) do not follow the contract", rejected)
 
     return Success(
-        Batch(request.client_id, request.client_version, tuple(item.event() for item in events))
+        Batch(
+            request.client_id,
+            request.client_version,
+            tuple(item.event() for item in events),
+            request.automated,
+        )
     )

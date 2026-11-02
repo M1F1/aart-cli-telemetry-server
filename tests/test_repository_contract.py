@@ -22,12 +22,13 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from returns.io import IOResult, IOSuccess
 from returns.pipeline import is_successful
-from sqlalchemy import create_engine, delete, inspect, select, text
+from sqlalchemy import Table, create_engine, delete, inspect, select, text
 
 from aart_cli_telemetry_server.adapters.memory import InMemoryEventRepository
 from aart_cli_telemetry_server.adapters.sql import (
     SCHEMA_VERSION,
     SqlEventRepository,
+    automation,
     events,
     failures,
     metadata,
@@ -56,6 +57,7 @@ def _sql(url: str) -> SqlEventRepository:
     repository = _value(open_repository(url))
     with repository.engine.begin() as connection:
         connection.execute(delete(failures))
+        connection.execute(delete(automation))
         connection.execute(delete(events))
     return repository
 
@@ -121,7 +123,9 @@ def test_an_id_kept_before_is_kept_once_and_unchanged(
     for _ in range(repeats):
         repository.add(history)
     changed = [
-        StoredEvent(stored.event, stored.client_id, "9.9.9", stored.received_at)
+        StoredEvent(
+            stored.event, stored.client_id, "9.9.9", stored.received_at, not stored.automated
+        )
         for stored in history
     ]
     repository.add(changed)
@@ -134,7 +138,7 @@ def test_nothing_to_add_and_ping(make: Callable[[], EventRepository]) -> None:
     assert repository.add([]) == IOSuccess(None)
     assert repository.ping() == IOSuccess(None)
     assert _value(repository.summary(stats.window(1, NOW))) == stats.Summary(
-        0, 0, 0, 0, 0, 0, 0, 0, 0
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     )
 
 
@@ -308,9 +312,10 @@ def test_replicas_starting_together_on_an_empty_database_all_open_it(
         engine.dispose()
 
 
+@pytest.mark.parametrize("later", [failures, automation], ids=["failure", "automation"])
 @pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
-def test_replicas_starting_together_on_a_database_before_failures_all_open_it(
-    tmp_path: Path, backend: str
+def test_replicas_starting_together_on_a_database_before_a_later_table_all_open_it(
+    tmp_path: Path, backend: str, later: Table
 ) -> None:
     url = _shared(tmp_path, backend)
     for _ in range(ROUNDS[backend]):
@@ -318,9 +323,9 @@ def test_replicas_starting_together_on_a_database_before_failures_all_open_it(
         _value(open_repository(url)).engine.dispose()
         engine = create_engine(url)
         with engine.begin() as connection:
-            failures.drop(connection)
+            later.drop(connection)
         assert _opened_together(url) == [True] * 4
-        assert "failure" in inspect(engine).get_table_names()
+        assert later.name in inspect(engine).get_table_names()
         engine.dispose()
 
 

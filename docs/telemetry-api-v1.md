@@ -48,6 +48,7 @@ other's code.
 | `schema_version` | The integer `1`. |
 | `client_id` | A lowercase UUID. Pseudonymous: aart-cli draws it at random when telemetry is turned on and draws a new one when its data is forgotten. It is not derived from the person, the machine or a path. |
 | `client_version` | The aart-cli version, 1–64 characters of `[0-9A-Za-z.+-]`. |
+| `automated` | Optional, `true` or `false`. `true` when aart-cli runs as automation -- a CI job, for one -- rather than for a person; aart-cli sends it only then, and a request without it is a person's. It says nothing more about the automation. |
 | `events` | 1–500 events. |
 
 Every event:
@@ -131,4 +132,8 @@ A change that a version-1 server or client would misread is version 2: a new pat
 (`/api/v2/...`) and a new `schema_version`. A new event type is added to version 1: a server that
 does not know it answers `422` naming those events, which the client marks rejected while the
 rest of the batch is stored, so nothing is misread and only the new type is lost. `unmanaged.used`
-was added this way, and `aart_cli.failed` with the `failure` field only it carries.
+was added this way, and `aart_cli.failed` with the `failure` field only it carries. An optional
+field of the request is added to version 1 when a client sends it only where it matters: a server
+that does not know it refuses just those requests, and the client marks their events rejected. `automated` was
+added this way: an older server loses only what automation sends, and a person's requests are
+unchanged.
