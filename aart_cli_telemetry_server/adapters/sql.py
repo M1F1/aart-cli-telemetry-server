@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -48,7 +49,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.types import TypeDecorator
 
 from aart_cli_telemetry_server.application.ports import StorageError
@@ -81,6 +82,7 @@ __all__ = [
 DATABASE = "telemetry.sqlite3"
 SCHEMA_VERSION = 1
 _BUSY_MILLISECONDS = 10_000
+_WAL_RETRY_SECONDS = 0.01
 #: The PostgreSQL advisory lock each server starting on a database holds while it checks and
 #: creates the schema. Any fixed number does; this one is "aart".
 _SCHEMA_LOCK = 0x61617274
@@ -157,10 +159,24 @@ def _wait_when_busy(engine: Engine) -> None:
 
 
 def _wal(engine: Engine) -> None:
-    """Readers never wait for the writer. Kept in the file, so set once, after the schema check."""
+    """Readers never wait for the writer. Kept in the file, so set once, after the schema check.
 
-    with engine.connect() as connection:
-        connection.exec_driver_sql("PRAGMA journal_mode = WAL")
+    Servers switching a new file together can find it locked without waiting, where SQLite will
+    not wait because waiting could deadlock; such a server tries again, a little later, until one
+    of them has switched it or the busy timeout has passed.
+    """
+
+    deadline = time.monotonic() + _BUSY_MILLISECONDS / 1000
+    while True:
+        try:
+            with engine.connect() as connection:
+                connection.exec_driver_sql("PRAGMA journal_mode = WAL")
+        except OperationalError as error:
+            if "locked" not in str(error.orig) or time.monotonic() >= deadline:
+                raise
+            time.sleep(_WAL_RETRY_SECONDS)
+        else:
+            return
 
 
 def _owner_only_file(url: str) -> None:
