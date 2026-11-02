@@ -3,7 +3,7 @@
 `python3 scripts/check_in_image.py IMAGE [--postgres POSTGRES_IMAGE] -- ARGUMENT...` installs
 what poetry.lock pins with the image's Python (`AART_CLI_TELEMETRY_PYTHON`, `python` by default)
 from the index `PIP_INDEX_URL` names, then runs that Python with the arguments. The images are
-pulled beforehand, each with its own credentials (scripts/pull_image.py), so this signs in to
+pulled beforehand, each with its own credentials (scripts/registry_image.py), so this signs in to
 nothing and pulls nothing.
 
 The files git tracks are copied into the container, as they are in the working tree, rather than

@@ -273,8 +273,10 @@ Each image has credentials of its own, so the CI images, the base and PostgreSQL
 different registries that take different accounts, or none: name a pair for an image that needs
 one, the same secrets for images that share an account, and nothing for an image pulled
 anonymously or with the runner's own sign-in. A pair signs in to the registry the image's name
-begins with, in a Docker configuration made for that one pull and removed after it, with the
-password on Docker's stdin (`scripts/pull_image.py`).
+begins with, in a Docker configuration made under the job's temporary directory for that one pull
+or push and removed after it, with the password on Docker's stdin (`scripts/registry_image.py`).
+Publishing works the same way, so the runner's own Docker configuration never holds a password,
+even on a shared runner whose job is stopped before it ends.
 
 Every job runs on the runner itself, which needs Docker with its default builder and a `python3`
 of 3.8 or later (ruff holds the scripts that run there to 3.8). Each job pulls its images first;

@@ -51,7 +51,7 @@ target-version = "py311"
 # These run on the CI runner itself, under whatever python3 the runner has, which may be as old as
 # 3.8. Ruff checks their syntax against that version and keeps pyupgrade from rewriting them to
 # newer forms such as `datetime.UTC`; it does not check which APIs a version has.
-per-file-target-version = { "scripts/image_smoke.py" = "py38", "scripts/pull_image.py" = "py38", "scripts/check_in_image.py" = "py38" }
+per-file-target-version = { "scripts/image_smoke.py" = "py38", "scripts/registry_image.py" = "py38", "scripts/check_in_image.py" = "py38" }
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "C4", "SIM", "RET", "PT", "PL", "RUF"]
