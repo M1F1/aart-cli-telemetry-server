@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
+import io
+import os
 import sqlite3
 import sys
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from aart_cli_telemetry_server.cli import (
+    BEHIND_PROXY_VARIABLE,
     DATA_DIR_VARIABLE,
     DATABASE_URL_VARIABLE,
     database_url,
@@ -34,6 +40,58 @@ def test_serve_refuses_beyond_loopback_without_a_proxy(capsys: pytest.CaptureFix
         False,
         False,
     ]
+
+
+def _served(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "aart_cli_telemetry_server.cli.uvicorn.run",
+        lambda app, **options: calls.append(options),
+    )
+    return calls
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", " True "])
+def test_the_proxy_in_front_can_be_said_by_a_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    calls = _served(monkeypatch)
+    monkeypatch.setenv(BEHIND_PROXY_VARIABLE, value)
+    assert main(["serve", "--host", "0.0.0.0", "--data-dir", str(tmp_path)]) == 0
+    assert [(call["host"], call["proxy_headers"]) for call in calls] == [("0.0.0.0", True)]
+
+
+@pytest.mark.parametrize("value", ["", "false", " FALSE "])
+def test_a_variable_that_says_no_proxy_is_refused_beyond_loopback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    calls = _served(monkeypatch)
+    monkeypatch.setenv(BEHIND_PROXY_VARIABLE, value)
+    assert main(["serve", "--host", "0.0.0.0", "--data-dir", str(tmp_path)]) == 2
+    assert main(["serve", "--data-dir", str(tmp_path)]) == 0
+    assert [call["proxy_headers"] for call in calls] == [False]
+
+
+@given(
+    value=st.text(
+        alphabet=st.characters(codec="utf-8", exclude_characters="\x00"), max_size=12
+    ).filter(lambda v: v.strip().lower() not in {"", "true", "false"})
+)
+def test_any_other_value_of_the_variable_refuses_to_start_even_with_the_flag(value: str) -> None:
+    # Not monkeypatch: Hypothesis runs this body many times inside one test.
+    before = os.environ.get(BEHIND_PROXY_VARIABLE)
+    os.environ[BEHIND_PROXY_VARIABLE] = value
+    error = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(error):
+            refused = main(["serve", "--behind-authenticating-proxy", "--data-dir", "/nonexistent"])
+    finally:
+        if before is None:
+            del os.environ[BEHIND_PROXY_VARIABLE]
+        else:
+            os.environ[BEHIND_PROXY_VARIABLE] = before
+    assert refused == 2
+    assert f"${BEHIND_PROXY_VARIABLE} is true or false" in error.getvalue()
 
 
 def test_the_database_is_the_flag_then_the_url_then_the_data_directory(

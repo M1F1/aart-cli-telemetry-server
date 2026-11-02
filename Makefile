@@ -1,4 +1,4 @@
-.PHONY: quality lint format format-check typecheck tach test coverage mutants image image-smoke
+.PHONY: quality lint format format-check typecheck tach test coverage mutants image image-smoke deploy smoke
 
 POETRY ?= poetry
 RUN = $(POETRY) run
@@ -15,7 +15,7 @@ format-check:
 	$(RUN) ruff format --check .
 
 typecheck:
-	$(RUN) mypy aart_cli_telemetry_server tests scripts
+	$(RUN) mypy aart_cli_telemetry_server deploy tests scripts
 
 tach:
 	$(RUN) tach check
@@ -42,3 +42,15 @@ image:
 
 image-smoke: image
 	$(RUN) python scripts/image_smoke.py $(IMAGE)
+
+# A deployment: TARGET is a module in deploy/targets/, ENVIRONMENT its settings. The plan is printed;
+# APPLY=1 runs it. `make smoke URL=https://...` checks a deployed server from here.
+TARGET ?=
+ENVIRONMENT ?=
+APPLY ?=
+URL ?=
+deploy:
+	$(RUN) python -m deploy --target $(TARGET) --environment $(ENVIRONMENT) $(if $(APPLY),--apply)
+
+smoke:
+	$(RUN) python -m deploy.smoke $(URL)

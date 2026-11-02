@@ -52,6 +52,12 @@ depends_on = [
     "aart_cli_telemetry_server.web",
 ]
 
+# Deploying the image: a platform is a parameter of the deployment, so no module of the server
+# depends on this, and this depends on no module of the server.
+[[modules]]
+path = "deploy"
+depends_on = []
+
 [external]
 # pydantic's own core, at the exact version pydantic pins; declaring it too would only let the two
 # drift. Its error types are what a validator raises.
