@@ -57,7 +57,10 @@ URL can carry a password, so it is never printed. `--data-dir` overrides both wi
 The schema is created in an empty database on first start; a database at another schema version,
 or not created by this server, is refused and left as it is. A version-1 database from before
 failures were received gains its `failure` table on the first start of this version, and nothing
-else in it changes.
+else in it changes. Servers starting together on one database do this one at a time, so every
+replica of a first deployment or an upgrade starts. A connection the database dropped -- a
+restart, a failover, an idle timeout -- is replaced before it is used, so the first request after
+one is answered rather than refused with 503.
 
 The application can also be served by any ASGI server, reading the same variables:
 

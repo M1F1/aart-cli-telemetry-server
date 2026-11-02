@@ -21,7 +21,8 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from returns.io import IOResult, IOSuccess
-from sqlalchemy import delete
+from returns.pipeline import is_successful
+from sqlalchemy import create_engine, delete, inspect, select, text
 
 from aart_cli_telemetry_server.adapters.memory import InMemoryEventRepository
 from aart_cli_telemetry_server.adapters.sql import (
@@ -29,7 +30,9 @@ from aart_cli_telemetry_server.adapters.sql import (
     SqlEventRepository,
     events,
     failures,
+    metadata,
     open_repository,
+    schema_info,
     sqlite_url,
 )
 from aart_cli_telemetry_server.application.ports import EventRepository, StorageError
@@ -237,6 +240,96 @@ def test_backup_is_a_consistent_readable_owner_only_copy(
     assert stat.S_IMODE(copied.stat().st_mode) == 0o600
     with sqlite3.connect(copied) as connection:
         assert connection.execute("SELECT COUNT(*) FROM event").fetchone()[0] == 3
+
+
+def _empty(url: str) -> None:
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        metadata.drop_all(connection)
+    engine.dispose()
+
+
+def _opened_together(url: str, replicas: int = 4) -> list[bool]:
+    """Whether each of `replicas` openers of `url`, started at one moment, opened it."""
+
+    barrier = threading.Barrier(replicas)
+    opened: list[bool] = []
+
+    def start() -> None:
+        barrier.wait()
+        result = perform(open_repository(url))
+        opened.append(is_successful(result))
+        if is_successful(result):
+            result.unwrap().engine.dispose()
+
+    threads = [threading.Thread(target=start) for _ in range(replicas)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+    return opened
+
+
+def _shared(tmp_path: Path, backend: str) -> str:
+    if backend == "postgresql":
+        if not POSTGRES:
+            pytest.skip("AART_CLI_TELEMETRY_TEST_POSTGRES_URL names no database")
+        return POSTGRES
+    (tmp_path / "data").mkdir(mode=0o700)
+    return sqlite_url(str(tmp_path / "data"))
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
+def test_replicas_starting_together_on_an_empty_database_all_open_it(
+    tmp_path: Path, backend: str
+) -> None:
+    url = _shared(tmp_path, backend)
+    for _ in range(3):
+        _empty(url)
+        assert _opened_together(url) == [True] * 4
+        engine = create_engine(url)
+        with engine.connect() as connection:
+            assert connection.execute(select(schema_info.c.version)).scalars().all() == [
+                SCHEMA_VERSION
+            ]
+        engine.dispose()
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
+def test_replicas_starting_together_on_a_database_before_failures_all_open_it(
+    tmp_path: Path, backend: str
+) -> None:
+    url = _shared(tmp_path, backend)
+    for _ in range(3):
+        _empty(url)
+        _value(open_repository(url)).engine.dispose()
+        engine = create_engine(url)
+        with engine.begin() as connection:
+            failures.drop(connection)
+        assert _opened_together(url) == [True] * 4
+        assert "failure" in inspect(engine).get_table_names()
+        engine.dispose()
+
+
+def test_a_connection_the_database_dropped_is_replaced_before_it_is_used() -> None:
+    if not POSTGRES:
+        pytest.skip("AART_CLI_TELEMETRY_TEST_POSTGRES_URL names no database")
+    repository = _sql(POSTGRES)
+    assert repository.ping() == IOSuccess(None)
+    # What a restart, a failover or an idle timeout does to the connections a pool holds.
+    administrator = create_engine(POSTGRES)
+    with administrator.connect() as connection:
+        connection.execute(
+            text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                " WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            )
+        )
+    administrator.dispose()
+
+    assert repository.ping() == IOSuccess(None)
+    assert repository.add([numbered(1)]) == IOSuccess(None)
+    repository.engine.dispose()
 
 
 def test_only_sqlite_is_backed_up_here() -> None:
