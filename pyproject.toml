@@ -79,7 +79,7 @@ exclude_also = ["if __name__ == .__main__.:", "raise AssertionError"]
 [tool.mutmut]
 source_paths = ["aart_cli_telemetry_server/domain/", "aart_cli_telemetry_server/application/"]
 also_copy = ["aart_cli_telemetry_server/", "contract/", "docs/"]
-pytest_add_cli_args_test_selection = ["tests/test_contract.py", "tests/test_stats.py", "tests/test_use_cases.py"]
+pytest_add_cli_args_test_selection = ["tests/test_contract.py", "tests/test_failures.py", "tests/test_stats.py", "tests/test_use_cases.py"]
 # tach's pytest plugin leaves threads behind that deadlock mutmut's forked workers on macOS: every
 # mutant then times out. The architecture is checked by `tach check`, not by this run.
 pytest_add_cli_args = ["-p", "no:tach"]

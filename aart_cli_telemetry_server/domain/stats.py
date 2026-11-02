@@ -12,13 +12,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from .events import EventType, Source, StoredEvent
+from .events import EventType, Failure, Source, StoredEvent
 
 __all__ = [
     "MAX_DAYS",
     "MAX_TOP",
     "ArtifactUsage",
     "DailyCount",
+    "FailureUsage",
     "SourceUsage",
     "Summary",
     "UnmanagedUsage",
@@ -27,6 +28,7 @@ __all__ = [
     "daily",
     "summarise",
     "top_artifacts",
+    "top_failures",
     "top_unmanaged",
     "window",
 ]
@@ -64,6 +66,8 @@ class Summary:
     used_artifacts: int
     #: Uses of skills and MCPs aart-cli did not install; never part of `uses`.
     unmanaged_uses: int
+    #: Failures aart-cli met (`aart_cli.failed`).
+    failures: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +90,25 @@ class UnmanagedUsage:
     uses: int
     clients: int
     last_used: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class FailureUsage:
+    """One defect, by its fingerprint: what it is, as its latest occurrence says, how often, by
+    how many installations, on which versions and platforms, and when first and last."""
+
+    fingerprint: str
+    kind: str
+    place: str
+    exception: str | None
+    frames: tuple[str, ...]
+    diagnostics: tuple[str, ...]
+    occurrences: int
+    clients: int
+    versions: tuple[str, ...]
+    platforms: tuple[str, ...]
+    first_seen: datetime
+    last_seen: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +149,7 @@ def summarise(events: Iterable[StoredEvent], period: Window) -> Summary:
         using_clients=len({stored.client_id for stored in uses}),
         used_artifacts=len({_artifact(stored) for stored in uses}),
         unmanaged_uses=kinds[EventType.UNMANAGED_USED],
+        failures=kinds[EventType.FAILED],
     )
 
 
@@ -179,6 +203,45 @@ def top_unmanaged(
             last_used=max(stored.event.occurred_at for stored in used),
         )
         for (kind, name), used in ranked[:limit]
+    )
+
+
+def top_failures(
+    events: Iterable[StoredEvent], period: Window, limit: int
+) -> tuple[FailureUsage, ...]:
+    """Defects by occurrences, then the latest first, then fingerprint. What a defect is -- its
+    frames with their lines -- is what its latest occurrence (then the greatest id) says."""
+
+    if not 1 <= limit <= MAX_TOP:
+        raise ValueError(f"a list is 1 to {MAX_TOP} failures long")
+    seen: dict[str, list[tuple[StoredEvent, Failure]]] = {}
+    for stored in _within(events, period):
+        if stored.event.failure is not None:
+            seen.setdefault(stored.event.failure.fingerprint, []).append(
+                (stored, stored.event.failure)
+            )
+    latest = {
+        name: max(held, key=lambda item: (item[0].event.occurred_at, item[0].event_id))
+        for name, held in seen.items()
+    }
+    ranked = sorted(seen)
+    ranked.sort(key=lambda name: (len(seen[name]), latest[name][0].event.occurred_at), reverse=True)
+    return tuple(
+        FailureUsage(
+            fingerprint=name,
+            kind=latest[name][0].event.artifact_type,
+            place=latest[name][0].event.artifact_id,
+            exception=latest[name][1].exception,
+            frames=latest[name][1].frames,
+            diagnostics=latest[name][1].diagnostics,
+            occurrences=len(seen[name]),
+            clients=len({stored.client_id for stored, _ in seen[name]}),
+            versions=tuple(sorted({stored.client_version for stored, _ in seen[name]})),
+            platforms=tuple(sorted({failure.platform for _, failure in seen[name]})),
+            first_seen=min(stored.event.occurred_at for stored, _ in seen[name]),
+            last_seen=latest[name][0].event.occurred_at,
+        )
+        for name in ranked[:limit]
     )
 
 

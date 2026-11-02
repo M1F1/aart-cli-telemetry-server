@@ -56,11 +56,12 @@ Every event:
 |---|---|
 | `event_id` | A lowercase UUID, drawn by aart-cli when the event is recorded. The server's idempotency key. |
 | `occurred_at` | UTC, `YYYY-MM-DDTHH:MM:SS` with an optional fraction of 1–6 digits, then `Z`. |
-| `event_type` | `artifact.installed`, `artifact.updated`, `artifact.removed`, `artifact.used` or `unmanaged.used`. |
-| `source` | `aart_cli` for the first three; `claude_hook` or `opencode_plugin` for `artifact.used` and `unmanaged.used`. |
+| `event_type` | `artifact.installed`, `artifact.updated`, `artifact.removed`, `artifact.used`, `unmanaged.used` or `aart_cli.failed`. |
+| `source` | `aart_cli` for the first three and `aart_cli.failed`; `claude_hook` or `opencode_plugin` for `artifact.used` and `unmanaged.used`. |
 | `artifact_id` | The artifact's name, 1–200 characters of `[0-9A-Za-z._@:+-]`. |
 | `artifact_type` | The artifact's kind, 1–64 characters of `[a-z0-9-]` (`skill`, `mcp`, `agent`, ...). |
-| `artifact_version` | Optional. 1–64 characters of `[0-9A-Za-z.+-]`. Never present in `unmanaged.used`. |
+| `artifact_version` | Optional. 1–64 characters of `[0-9A-Za-z.+-]`. Never present in `unmanaged.used` or `aart_cli.failed`. |
+| `failure` | Present in `aart_cli.failed` and in no other event; see below. |
 
 No other field is accepted, in the request or in an event. In particular an event never carries a
 prompt, what a tool was called with, a file's content, a path, a project, a Registry address, a
@@ -73,6 +74,29 @@ for Claude Code, the whole tool name for opencode) and `artifact_type` is `skill
 sends it only while the person, or without their choice the build, says such uses are sent. A use
 aart-cli can attribute is never sent as `unmanaged.used`. Installation, use of an installed artifact
 and use of anything else are separate event types and the server keeps them apart.
+
+## Failures
+
+`aart_cli.failed` is a failure aart-cli met. `artifact_type` is its kind: `crash` (an exception no
+handler took), `error` (a command that ended with a nonzero exit code, or a terminal action that
+stopped) or `interrupted` (Ctrl+C). `artifact_id` is where it happened, 1–128 characters of
+`[a-z0-9._-]` starting with a letter or digit, in aart-cli's own words: a command's subcommands
+joined by `.` (`consume.update`), `tui` or `tui.<action>`, `usage-hook`, `telemetry-sync`. It has
+no `artifact_version`; the request's `client_version` is the version that failed. Its `failure`:
+
+| Field | Rule |
+|---|---|
+| `fingerprint` | 16 lowercase hex digits: the first 16 of the SHA-256 of the UTF-8 JSON array `[artifact_type, artifact_id, exception or "", frames without their `:line`, diagnostics]`, written without spaces. The server checks it. |
+| `exception` | Required for `crash`, optional otherwise. An exception's type name, 1–128 characters of `[A-Za-z0-9_.]` starting with a letter or `_`. |
+| `frames` | 0–30 strings `module:function:line`, innermost last: `module` `aart_cli` or a dotted name below it (`aart_cli.io.receipt_store`), at most 128 characters of `[A-Za-z0-9_.]`, `function` 1–128 characters of `[A-Za-z0-9_<>]`, `line` 1–6 digits. Only frames of aart-cli's own package. |
+| `diagnostics` | 0–10 distinct diagnostic codes, each 1–64 characters of `[a-z0-9.-]` starting with a letter or digit. |
+| `exit_code` | Optional. An integer 0–255. |
+| `python` | Python's version, 1–32 characters of `[0-9A-Za-z.+-]`. |
+| `platform` | `darwin`, `linux` or `other`. |
+
+All of them but `exception` and `exit_code` are required, and no other field is accepted. A
+failure never carries an exception's message, an argument, a path, a project, an environment
+variable, an input's value or a credential.
 
 ## Responses
 
@@ -97,8 +121,9 @@ These are the server's own and not part of what aart-cli relies on.
 
 - `GET /healthz` -- `{"status": "ok"}` when the database can be read.
 - `GET /dashboard` -- the dashboard.
-- `GET /api/v1/stats/summary`, `/api/v1/stats/top-artifacts`, `/api/v1/stats/daily`,
-  `/api/v1/stats/by-source` -- the dashboard's aggregates.
+- `GET /api/v1/stats/summary`, `/api/v1/stats/top-artifacts`, `/api/v1/stats/top-unmanaged`,
+  `/api/v1/stats/failures`, `/api/v1/stats/daily`, `/api/v1/stats/by-source` -- the dashboard's
+  aggregates.
 
 ## Versioning
 
@@ -106,4 +131,4 @@ A change that a version-1 server or client would misread is version 2: a new pat
 (`/api/v2/...`) and a new `schema_version`. A new event type is added to version 1: a server that
 does not know it answers `422` naming those events, which the client marks rejected while the
 rest of the batch is stored, so nothing is misread and only the new type is lost. `unmanaged.used`
-was added this way.
+was added this way, and `aart_cli.failed` with the `failure` field only it carries.

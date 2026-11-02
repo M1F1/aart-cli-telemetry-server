@@ -76,6 +76,12 @@ class _Recording(InMemoryEventRepository):
         self.periods.append(("unmanaged", period, limit))
         return super().top_unmanaged(period, limit)
 
+    def top_failures(
+        self, period: stats.Window, limit: int
+    ) -> IOResult[tuple[stats.FailureUsage, ...], StorageError]:
+        self.periods.append(("failures", period, limit))
+        return super().top_failures(period, limit)
+
     def daily(self, period: stats.Window) -> IOResult[tuple[stats.DailyCount, ...], StorageError]:
         self.periods.append(("daily", period, None))
         return super().daily(period)
@@ -93,16 +99,18 @@ def test_each_reading_asks_for_the_last_days_before_the_clock(days: int, limit: 
     since = stats.Window(NOW - timedelta(days=days))
 
     assert use_cases.summary(days, repository, lambda: NOW) == IOSuccess(
-        stats.Summary(0, 0, 0, 0, 0, 0, 0, 0)
+        stats.Summary(0, 0, 0, 0, 0, 0, 0, 0, 0)
     )
     assert use_cases.top_artifacts(days, limit, repository, lambda: NOW) == IOSuccess(())
     assert use_cases.top_unmanaged(days, limit, repository, lambda: NOW) == IOSuccess(())
+    assert use_cases.top_failures(days, limit, repository, lambda: NOW) == IOSuccess(())
     assert use_cases.daily_counts(days, repository, lambda: NOW) == IOSuccess(())
     assert use_cases.artifacts_by_source(days, repository, lambda: NOW) == IOSuccess(())
     assert repository.periods == [
         ("summary", since, None),
         ("top", since, limit),
         ("unmanaged", since, limit),
+        ("failures", since, limit),
         ("daily", since, None),
         ("source", since, None),
     ]

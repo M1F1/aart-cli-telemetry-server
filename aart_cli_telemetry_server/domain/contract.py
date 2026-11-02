@@ -28,7 +28,16 @@ from pydantic import (
 from pydantic_core import ErrorDetails, PydanticCustomError
 from returns.result import Failure, Result, Success
 
-from .events import SOURCES_FOR, Batch, Event, EventType, Source
+from .events import (
+    FAILURE_KINDS,
+    SOURCES_FOR,
+    Batch,
+    Event,
+    EventType,
+    Source,
+    fingerprint,
+)
+from .events import Failure as FailureReport
 
 __all__ = [
     "MAX_BODY_BYTES",
@@ -49,6 +58,10 @@ _NAME = r"^[0-9A-Za-z._@:+-]{1,200}$"
 _KIND = r"^[a-z0-9-]{1,64}$"
 _VERSION = r"^[0-9A-Za-z.+-]{1,64}$"
 _UUID_PATTERN = re.compile(_UUID)
+_PLACE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
+_MODULE_MAX = 128
+MAX_FRAMES = 30
+MAX_DIAGNOSTICS = 10
 
 
 def _moment(value: str) -> datetime:
@@ -69,6 +82,51 @@ Uuid = Annotated[str, StringConstraints(pattern=_UUID)]
 Moment = Annotated[str, StringConstraints(pattern=_MOMENT), AfterValidator(_a_moment_that_exists)]
 
 
+def _a_frame_of_aart_cli(value: str) -> str:
+    if len(value.split(":", 1)[0]) > _MODULE_MAX:
+        raise PydanticCustomError("failure_frame", "a frame of aart-cli's own package")
+    return value
+
+
+Frame = Annotated[
+    str,
+    StringConstraints(pattern=r"^aart_cli(\.[A-Za-z0-9_]+)*:[A-Za-z0-9_<>]{1,128}:[0-9]{1,6}$"),
+    AfterValidator(_a_frame_of_aart_cli),
+]
+Code = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9.-]{0,63}$")]
+
+
+class _FailureDocument(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    fingerprint: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{16}$")]
+    exception: (
+        Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")] | None
+    ) = None
+    frames: Annotated[list[Frame], Field(max_length=MAX_FRAMES)]
+    diagnostics: Annotated[list[Code], Field(max_length=MAX_DIAGNOSTICS)]
+    exit_code: Annotated[int, Field(strict=True, ge=0, le=255)] | None = None
+    python: Annotated[str, StringConstraints(pattern=r"^[0-9A-Za-z.+-]{1,32}$")]
+    platform: Literal["darwin", "linux", "other"]
+
+    @model_validator(mode="after")
+    def _codes_are_distinct(self) -> Self:
+        if len(set(self.diagnostics)) != len(self.diagnostics):
+            raise PydanticCustomError("failure_codes", "diagnostics are distinct")
+        return self
+
+    def failure(self) -> FailureReport:
+        return FailureReport(
+            self.fingerprint,
+            self.exception,
+            tuple(self.frames),
+            tuple(self.diagnostics),
+            self.exit_code,
+            self.python,
+            self.platform,
+        )
+
+
 class _EventDocument(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
@@ -80,11 +138,13 @@ class _EventDocument(BaseModel):
         "artifact.removed",
         "artifact.used",
         "unmanaged.used",
+        "aart_cli.failed",
     ]
     source: Literal["aart_cli", "claude_hook", "opencode_plugin"]
     artifact_id: Annotated[str, StringConstraints(pattern=_NAME)]
     artifact_type: Annotated[str, StringConstraints(pattern=_KIND)]
     artifact_version: Annotated[str, StringConstraints(pattern=_VERSION)] | None = None
+    failure: _FailureDocument | None = None
 
     @model_validator(mode="after")
     def _source_reports_its_own_types(self) -> Self:
@@ -96,6 +156,32 @@ class _EventDocument(BaseModel):
             raise PydanticCustomError(
                 "unmanaged_version", "an unmanaged.used event has no artifact_version"
             )
+        if self.event_type != EventType.FAILED.value:
+            if self.failure is not None:
+                raise PydanticCustomError("failure_elsewhere", "only aart_cli.failed has a failure")
+            return self
+        return self._a_failure_that_is_its_own()
+
+    def _a_failure_that_is_its_own(self) -> Self:
+        failure = self.failure
+        if failure is None:
+            raise PydanticCustomError("failure_missing", "aart_cli.failed has a failure")
+        if (
+            self.artifact_type not in FAILURE_KINDS
+            or _PLACE.fullmatch(self.artifact_id) is None
+            or self.artifact_version is not None
+            or (self.artifact_type == "crash" and failure.exception is None)
+        ):
+            raise PydanticCustomError("failure_shape", "a failure does not follow the contract")
+        expected = fingerprint(
+            self.artifact_type,
+            self.artifact_id,
+            failure.exception,
+            failure.frames,
+            failure.diagnostics,
+        )
+        if failure.fingerprint != expected:
+            raise PydanticCustomError("failure_fingerprint", "the fingerprint is not the failure's")
         return self
 
     def event(self) -> Event:
@@ -107,6 +193,7 @@ class _EventDocument(BaseModel):
             self.artifact_id,
             self.artifact_type,
             self.artifact_version,
+            None if self.failure is None else self.failure.failure(),
         )
 
 
@@ -163,6 +250,19 @@ _EVENT_REASONS = {
     "artifact_id": "artifact_id must be 1-200 characters of [0-9A-Za-z._@:+-]",
     "artifact_type": "artifact_type must be 1-64 characters of [a-z0-9-]",
     "artifact_version": "artifact_version must be 1-64 characters of [0-9A-Za-z.+-]",
+    "failure": "failure must be the contract's failure object",
+}
+#: Reasons the contract's own rules give, by the custom error each raises.
+_RULE_REASONS = {
+    "source_event_type": "this source cannot report this event_type",
+    "unmanaged_version": "an unmanaged.used event has no artifact_version",
+    "failure_elsewhere": "only an aart_cli.failed event has a failure",
+    "failure_missing": "an aart_cli.failed event has a failure",
+    "failure_shape": (
+        "an aart_cli.failed event is a crash, error or interruption at a place, with no "
+        "artifact_version, and a crash names its exception"
+    ),
+    "failure_fingerprint": "the failure's fingerprint is not its own",
 }
 
 
@@ -182,15 +282,15 @@ def _event_reason(error: ErrorDetails) -> str:
     kind, location = error["type"], error["loc"]
     if kind == "extra_forbidden":
         return "a field the contract does not have"
+    field = str(location[2]) if len(location) > 2 else ""
+    if field == "failure":
+        return _EVENT_REASONS["failure"]
     if kind == "model_type":
         return "an event must be an object"
-    field = str(location[2]) if len(location) > 2 else ""
     if kind == "missing":
         return f"missing {field}"
-    if kind == "source_event_type":
-        return "this source cannot report this event_type"
-    if kind == "unmanaged_version":
-        return "an unmanaged.used event has no artifact_version"
+    if kind in _RULE_REASONS:
+        return _RULE_REASONS[str(kind)]
     return _EVENT_REASONS.get(field, "an event does not follow the contract")
 
 

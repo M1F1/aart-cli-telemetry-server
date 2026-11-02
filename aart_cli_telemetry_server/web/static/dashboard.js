@@ -26,6 +26,7 @@ function tiles(summary) {
     ["Updates", summary.updates],
     ["Removals", summary.removals],
     ["Uses of tools aart-cli did not install", summary.unmanaged_uses],
+    ["Errors aart-cli met", summary.failures],
   ];
   const root = document.getElementById("tiles");
   root.replaceChildren(
@@ -61,12 +62,13 @@ function draw(id, type, labels, datasets, options = {}) {
 
 async function refresh() {
   const days = document.getElementById("days").value;
-  const [summary, daily, top, unmanaged, sources] = await Promise.all([
+  const [summary, daily, top, unmanaged, sources, failures] = await Promise.all([
     stats("summary", days),
     stats("daily", days),
     stats("top-artifacts", days),
     stats("top-unmanaged", days),
     stats("by-source", days),
+    stats("failures", days),
   ]);
   tiles(summary);
   const labels = daily.daily.map((row) => row.day);
@@ -110,6 +112,25 @@ async function refresh() {
         cell(row.uses, "number"),
         cell(row.clients, "number"),
         cell(row.last_used)
+      );
+      return tr;
+    })
+  );
+  document.getElementById("failures").replaceChildren(
+    ...failures.failures.map((row) => {
+      const tr = document.createElement("tr");
+      const what = [row.exception, ...row.diagnostics].filter(Boolean).join(", ");
+      const where = cell(row.place);
+      where.title = row.frames.join("\n");
+      tr.append(
+        where,
+        cell(row.kind),
+        cell(what),
+        cell(row.occurrences, "number"),
+        cell(row.clients, "number"),
+        cell(row.versions.join(", ")),
+        cell(row.platforms.join(", ")),
+        cell(row.last_seen)
       );
       return tr;
     })

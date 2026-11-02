@@ -4,6 +4,11 @@ Receives artifact telemetry from [aart-cli](https://github.com/M1F1/aart-cli), s
 database -- SQLite by default, PostgreSQL by URL -- and shows it on a dashboard in the browser: which artifacts are used, how often, by how many
 installations, and how installs, updates and removals change over time. Uses of skills and MCPs
 aart-cli did not install (`unmanaged.used`) are counted apart, by the name the harness gave them.
+Failures aart-cli met (`aart_cli.failed`: a crash, a command that ended in an error, an
+interruption) are grouped by fingerprint -- the defect, not its line numbers -- with how often, on
+how many installations, on which versions and platforms. A failure carries an exception's type
+name, aart-cli's own frames and diagnostic codes; never a message, an argument or a path. The
+server recomputes each fingerprint and refuses one that is not the failure's own.
 
 - **The contract** between aart-cli and this server is [`docs/telemetry-api-v1.md`](docs/telemetry-api-v1.md)
   with [`contract/telemetry-api-v1.examples.json`](contract/telemetry-api-v1.examples.json). Both
@@ -50,7 +55,9 @@ else `$XDG_DATA_HOME/aart-cli-telemetry-server`, else `~/.local/share/aart-cli-t
 `postgresql+psycopg://telemetry@db/telemetry` (install the `postgresql` extra for the driver); a
 URL can carry a password, so it is never printed. `--data-dir` overrides both with SQLite there.
 The schema is created in an empty database on first start; a database at another schema version,
-or not created by this server, is refused and left as it is.
+or not created by this server, is refused and left as it is. A version-1 database from before
+failures were received gains its `failure` table on the first start of this version, and nothing
+else in it changes.
 
 The application can also be served by any ASGI server, reading the same variables:
 
@@ -92,9 +99,10 @@ takes a consistent copy with SQLite's online backup while the server runs. For P
 | `POST /api/v1/events/batch` | The contract's ingest endpoint. |
 | `GET /healthz` | `{"status": "ok"}` when the database can be read. |
 | `GET /dashboard` | The dashboard. |
-| `GET /api/v1/stats/summary?days=30` | Uses, installs, updates, removals, active installations, uses of tools aart-cli did not install. |
+| `GET /api/v1/stats/summary?days=30` | Uses, installs, updates, removals, active installations, uses of tools aart-cli did not install, failures aart-cli met. |
 | `GET /api/v1/stats/top-artifacts?days=30&limit=20` | Artifacts by uses. |
 | `GET /api/v1/stats/top-unmanaged?days=30&limit=20` | Skills and MCPs aart-cli did not install, by uses (`unmanaged.used`). |
+| `GET /api/v1/stats/failures?days=30&limit=20` | Failures aart-cli met, by defect (`aart_cli.failed`): most frequent, then most recent, first. |
 | `GET /api/v1/stats/daily?days=30` | Per UTC day. |
 | `GET /api/v1/stats/by-source?days=30` | Uses per harness and kind. |
 

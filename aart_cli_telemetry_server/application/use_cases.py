@@ -13,6 +13,7 @@ from aart_cli_telemetry_server.domain.events import Batch, acknowledged, stored_
 from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
     DailyCount,
+    FailureUsage,
     SourceUsage,
     Summary,
     UnmanagedUsage,
@@ -29,6 +30,7 @@ __all__ = [
     "ingest",
     "summary",
     "top_artifacts",
+    "top_failures",
     "top_unmanaged",
 ]
 
@@ -71,6 +73,12 @@ def top_unmanaged(
     days: int, limit: int, repository: EventRepository, clock: Clock
 ) -> IOResult[tuple[UnmanagedUsage, ...], StorageError]:
     return repository.top_unmanaged(window(days, clock()), limit)
+
+
+def top_failures(
+    days: int, limit: int, repository: EventRepository, clock: Clock
+) -> IOResult[tuple[FailureUsage, ...], StorageError]:
+    return repository.top_failures(window(days, clock()), limit)
 
 
 def daily_counts(

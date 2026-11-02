@@ -39,6 +39,9 @@ EVENT_FIELDS = {
 }
 
 
+_FAILED = next(example["request"] for example in EXAMPLES["valid"] if "failure" in example["name"])
+
+
 def _valid() -> dict[str, Any]:
     return copy.deepcopy(EXAMPLES["valid"][0]["request"])
 
@@ -188,8 +191,10 @@ def test_every_required_field_is_required(field: str) -> None:
 @given(event_type=st.sampled_from(list(EventType)), source=st.sampled_from(list(Source)))
 def test_a_source_reports_only_its_own_event_types(event_type: EventType, source: Source) -> None:
     document = _valid()
+    if event_type is EventType.FAILED:
+        document["events"] = [copy.deepcopy(_FAILED["events"][0])]
     document["events"][0].update(event_type=event_type.value, source=source.value)
-    del document["events"][0]["artifact_version"]
+    document["events"][0].pop("artifact_version", None)
     assert is_successful(_read(document)) == (source in SOURCES_FOR[event_type])
 
 
