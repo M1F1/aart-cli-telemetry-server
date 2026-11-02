@@ -8,7 +8,9 @@ only when the URL is SQLite's.
 
 A database this server did not create, or created at another schema version, is refused and left
 exactly as it is. A table schema version 1 gained later -- `failure`, for `aart_cli.failed` -- is
-created in a version-1 database that does not have it yet, and nothing else in it changes.
+created in a version-1 database that does not have it yet, and nothing else in it changes. Servers
+starting together on one database check and create the schema one at a time, and a connection the
+database dropped -- a restart, a failover, an idle timeout -- is replaced before it is used.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from typing import Any, TypeVar
 from returns.io import IOFailure, IOResult, IOSuccess
 from sqlalchemy import (
     Column,
+    Connection,
     Date,
     DateTime,
     Dialect,
@@ -78,6 +81,9 @@ __all__ = [
 DATABASE = "telemetry.sqlite3"
 SCHEMA_VERSION = 1
 _BUSY_MILLISECONDS = 10_000
+#: The PostgreSQL advisory lock each server starting on a database holds while it checks and
+#: creates the schema. Any fixed number does; this one is "aart".
+_SCHEMA_LOCK = 0x61617274
 
 _T = TypeVar("_T")
 
@@ -514,25 +520,40 @@ def _failure_usage(name: str, rows: list[Any]) -> FailureUsage:
 
 
 def _prepare(engine: Engine) -> None:
-    """Create the schema in an empty database; refuse one at another version, changing nothing."""
+    """Create the schema in an empty database; refuse one at another version, changing nothing.
 
-    tables = set(inspect(engine).get_table_names())
-    if not tables:
-        with engine.begin() as connection:
+    One transaction, holding the lock every server starting on the database takes, so replicas
+    starting together do this one at a time: the first creates what is missing and the others
+    find it there.
+    """
+
+    with engine.begin() as connection:
+        _one_at_a_time(connection)
+        tables = set(inspect(connection).get_table_names())
+        if not tables:
             metadata.create_all(connection)
             connection.execute(schema_info.insert(), {"id": 1, "version": SCHEMA_VERSION})
-        return
-    if "schema_info" not in tables:
-        raise _Refused("this database was not created by aart-cli-telemetry-server")
-    with engine.connect() as connection:
+            return
+        if "schema_info" not in tables:
+            raise _Refused("this database was not created by aart-cli-telemetry-server")
         version = connection.execute(select(schema_info.c.version)).scalar()
-    if version != SCHEMA_VERSION:
-        raise _Refused(
-            f"this database has schema version {version}; this server reads {SCHEMA_VERSION}"
-        )
-    if "failure" not in tables:
-        with engine.begin() as connection:
+        if version != SCHEMA_VERSION:
+            raise _Refused(
+                f"this database has schema version {version}; this server reads {SCHEMA_VERSION}"
+            )
+        if "failure" not in tables:
             failures.create(connection)
+
+
+def _one_at_a_time(connection: Connection) -> None:
+    """Hold, until this transaction ends, the lock each server starting on the database takes."""
+
+    if connection.dialect.name == "postgresql":
+        connection.execute(select(func.pg_advisory_xact_lock(_SCHEMA_LOCK)))
+    elif connection.dialect.name == "sqlite":
+        # The write lock now rather than at the first write, so a second server waits here (up to
+        # the busy timeout) instead of reading a schema the first is still creating.
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
 
 
 class _Refused(Exception):
@@ -546,7 +567,9 @@ def open_repository(url: str) -> IOResult[SqlEventRepository, StorageError]:
         backend = make_url(url).get_backend_name()
         if backend == "sqlite":
             _owner_only_file(url)
-        engine = create_engine(url)
+        # A pooled connection is checked before it is used, so the first request after the
+        # database restarted is served rather than answered 503.
+        engine = create_engine(url, pool_pre_ping=True)
         if backend == "sqlite":
             _wait_when_busy(engine)
         _prepare(engine)

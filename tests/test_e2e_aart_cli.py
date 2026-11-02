@@ -9,7 +9,8 @@ artifact answers to, sends it as `unmanaged.used`, and after `consume telemetry 
 the next one no more. A third has aart-cli fail -- a command that ends in an error, and a crash in
 its own code -- sends both as `aart_cli.failed`, and after `consume telemetry errors off` sends the
 next one no more. Nothing touches the real home: HOME and AART_CLI_HOME are temporary
-directories; PYTHONPATH is passed on, so it can name an aart-cli checkout.
+directories; PYTHONPATH is passed on, so it can name an aart-cli checkout. Each test runs on SQLite,
+and on PostgreSQL too when `AART_CLI_TELEMETRY_TEST_POSTGRES_URL` names a database it may empty.
 """
 
 from __future__ import annotations
@@ -25,8 +26,15 @@ from pathlib import Path
 
 import pytest
 import uvicorn
+from sqlalchemy import delete
 
-from aart_cli_telemetry_server.adapters.sql import SqlEventRepository, open_repository, sqlite_url
+from aart_cli_telemetry_server.adapters.sql import (
+    SqlEventRepository,
+    events,
+    failures,
+    open_repository,
+    sqlite_url,
+)
 from aart_cli_telemetry_server.domain.stats import window
 from aart_cli_telemetry_server.effects import perform
 from aart_cli_telemetry_server.web.app import create_app
@@ -34,6 +42,7 @@ from aart_cli_telemetry_server.web.app import create_app
 from .strategies import NOW
 
 PYTHON = os.environ.get("AART_CLI_PYTHON", "").strip()
+POSTGRES = os.environ.get("AART_CLI_TELEMETRY_TEST_POSTGRES_URL", "").strip()
 pytestmark = pytest.mark.skipif(not PYTHON, reason="set AART_CLI_PYTHON to run against aart-cli")
 
 _SEED = """
@@ -87,9 +96,23 @@ def _free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-@pytest.fixture
-def served(tmp_path: Path) -> Iterator[tuple[str, SqlEventRepository]]:
-    repository = perform(open_repository(sqlite_url(str(tmp_path / "server")))).unwrap()
+def _repository(backend: str, tmp_path: Path) -> SqlEventRepository:
+    if backend == "sqlite":
+        return perform(open_repository(sqlite_url(str(tmp_path / "server")))).unwrap()
+    if not POSTGRES:
+        pytest.skip("AART_CLI_TELEMETRY_TEST_POSTGRES_URL names no database")
+    repository = perform(open_repository(POSTGRES)).unwrap()
+    with repository.engine.begin() as connection:
+        connection.execute(delete(failures))
+        connection.execute(delete(events))
+    return repository
+
+
+@pytest.fixture(params=["sqlite", "postgresql"])
+def served(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> Iterator[tuple[str, SqlEventRepository]]:
+    repository = _repository(request.param, tmp_path)
     port = _free_port()
     running = uvicorn.Server(
         uvicorn.Config(create_app(repository), host="127.0.0.1", port=port, log_level="warning")
