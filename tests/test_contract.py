@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import example as pinned
 from hypothesis import given
 from hypothesis import strategies as st
 from returns.pipeline import is_successful
@@ -36,7 +37,10 @@ EVENT_FIELDS = {
     "artifact_id",
     "artifact_type",
     "artifact_version",
+    "failure",
 }
+#: The fields an event may leave out; the failure is only aart_cli.failed's.
+OPTIONAL_EVENT_FIELDS = {"artifact_version", "failure"}
 
 
 _FAILED = next(example["request"] for example in EXAMPLES["valid"] if "failure" in example["name"])
@@ -171,6 +175,7 @@ def test_every_invalid_event_is_named_once_with_its_id_when_it_has_one() -> None
     field=st.text(alphabet=string.ascii_lowercase + "_", min_size=1, max_size=20),
     value=st.one_of(st.text(max_size=20), st.integers(), st.none()),
 )
+@pinned(field="failure", value=None)
 def test_any_field_outside_the_contract_refuses_the_event(field: str, value: object) -> None:
     if field in EVENT_FIELDS:
         return
@@ -181,7 +186,7 @@ def test_any_field_outside_the_contract_refuses_the_event(field: str, value: obj
     assert refused.rejected_events[0].reason == "a field the contract does not have"
 
 
-@given(field=st.sampled_from(sorted(EVENT_FIELDS - {"artifact_version"})))
+@given(field=st.sampled_from(sorted(EVENT_FIELDS - OPTIONAL_EVENT_FIELDS)))
 def test_every_required_field_is_required(field: str) -> None:
     document = _valid()
     del document["events"][0][field]
