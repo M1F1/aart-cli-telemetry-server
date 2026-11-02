@@ -5,21 +5,30 @@
 # The image listens on 0.0.0.0:8000 only when its arguments include --behind-authenticating-proxy;
 # without them it refuses to start, as `serve` does. Version 1 of the API carries no client
 # credential, so the deployment must put an authenticating proxy or ingress in front.
+#
+# PYTHON_IMAGE is the base, any Debian-based image with Python 3.11 or later. The packages come
+# from pip's index, or from the one the build secret `pip-index` holds (a URL, with its credentials
+# where it needs them), present only while the step that installs runs and never in a layer:
+#   docker build --secret id=pip-index,env=PIP_INDEX_URL .
+# What is installed is what poetry.lock pins, every hash checked (scripts/locked_requirements.py).
 
 ARG PYTHON_IMAGE=python:3.13-slim-bookworm
 
 FROM ${PYTHON_IMAGE} AS build
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1 \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=true
-RUN pip install poetry==2.4.1
+    PIP_NO_CACHE_DIR=1
 WORKDIR /opt/aart-cli-telemetry-server
 COPY pyproject.toml poetry.lock README.md LICENSE ./
-RUN poetry install --only main --all-extras --no-root
+COPY scripts/locked_requirements.py ./scripts/
+RUN --mount=type=secret,id=pip-index \
+    if [ -s /run/secrets/pip-index ]; then PIP_INDEX_URL="$(cat /run/secrets/pip-index)"; export PIP_INDEX_URL; fi \
+    && python scripts/locked_requirements.py main > requirements.txt \
+    && python -m venv .venv \
+    && .venv/bin/python -m pip install --require-hashes --no-deps --requirement requirements.txt
 COPY aart_cli_telemetry_server ./aart_cli_telemetry_server
-RUN poetry build --format wheel \
-    && .venv/bin/python -m pip install --no-deps dist/*.whl
+RUN --mount=type=secret,id=pip-index \
+    if [ -s /run/secrets/pip-index ]; then PIP_INDEX_URL="$(cat /run/secrets/pip-index)"; export PIP_INDEX_URL; fi \
+    && .venv/bin/python -m pip install --no-deps .
 
 FROM ${PYTHON_IMAGE}
 ENV PYTHONDONTWRITEBYTECODE=1 \

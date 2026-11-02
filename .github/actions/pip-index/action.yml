@@ -1,0 +1,33 @@
+name: pip index
+description: >
+  Point pip, and the image build's `pip-index` secret, at the index this copy installs from, with
+  credentials where the index needs them, as aart-cli does. Every job that installs anything uses
+  it, so no job reaches pypi.org from a runner that cannot.
+
+runs:
+  using: composite
+  steps:
+  # `AART_CLI_TELEMETRY_INDEX_URL` and `AART_CLI_TELEMETRY_INDEX_CREDENTIALS` are job environment,
+  # not inputs: an input would put the credential in the action call.
+  - name: Point pip at the index
+    shell: bash
+    run: |
+      set -euo pipefail
+      url="${AART_CLI_TELEMETRY_INDEX_URL:-https://pypi.org/simple}"
+      echo "pip index: $url"
+      if [ -n "${AART_CLI_TELEMETRY_INDEX_CREDENTIALS:-}" ]; then
+        # GitHub masks the whole `user:pass` it was given, not either half, so both are masked
+        # before they are used.
+        user="${AART_CLI_TELEMETRY_INDEX_CREDENTIALS%%:*}"
+        held="${AART_CLI_TELEMETRY_INDEX_CREDENTIALS#*:}"
+        echo "::add-mask::$user"
+        echo "::add-mask::$held"
+        scheme="https"
+        case "$url" in http://*) scheme="http" ;; esac
+        host="${url#http://}"
+        host="${host#https://}"
+        at="@"
+        url="$scheme://$user:$held$at$host"
+        echo "pip index: credentials supplied from a named secret"
+      fi
+      echo "PIP_INDEX_URL=$url" >> "$GITHUB_ENV"

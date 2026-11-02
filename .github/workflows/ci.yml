@@ -8,52 +8,98 @@ on:
 permissions:
   contents: read
 
+# What a copy of this repository differs in is a variable of its own (Settings, Secrets and
+# variables, Actions), with this repository's value as the fallback; README.md, "Your
+# organisation's copy", lists them. A secret is named by a variable, never read by a fixed name.
+env:
+  AART_CLI_TELEMETRY_INDEX_URL: ${{ vars.AART_CLI_TELEMETRY_PIP_INDEX_URL || 'https://pypi.org/simple' }}
+  AART_CLI_TELEMETRY_INDEX_CREDENTIALS: ${{ secrets[vars.AART_CLI_TELEMETRY_PIP_INDEX_CREDENTIALS_SECRET_NAME] }}
+  AART_CLI_TELEMETRY_PYTHON_IMAGE: ${{ vars.AART_CLI_TELEMETRY_PYTHON_IMAGE || 'python:3.13-slim-bookworm' }}
+  AART_CLI_TELEMETRY_POSTGRES_IMAGE: ${{ vars.AART_CLI_TELEMETRY_POSTGRES_IMAGE }}
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_ROOT_USER_ACTION: ignore
+
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
+    container: ${{ format('{0}:{1}', vars.AART_CLI_TELEMETRY_CI_PYTHON_IMAGE || 'python', matrix.python-version) }}
     strategy:
       matrix:
-        python-version: ["3.11", "3.13"]
+        python-version: ${{ fromJSON(vars.AART_CLI_TELEMETRY_PYTHON_VERSIONS || '["3.11", "3.13"]') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - run: pipx install poetry==2.4.1
-      - run: poetry install --with dev --all-extras
-      - run: make quality
+      - uses: ./.github/actions/pip-index
+      # pip installs what poetry.lock pins, every hash checked, so the index is a variable rather
+      # than a source edited into pyproject.toml (scripts/locked_requirements.py).
+      - name: Install what poetry.lock pins
+        run: |
+          python scripts/locked_requirements.py main dev > "$RUNNER_TEMP/requirements.txt"
+          python -m pip install --require-hashes --no-deps --requirement "$RUNNER_TEMP/requirements.txt"
+          python -m pip install --no-deps --editable .
+      - run: make quality RUN=
 
   postgresql:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
+    container: ${{ format('{0}:{1}', vars.AART_CLI_TELEMETRY_CI_PYTHON_IMAGE || 'python', vars.AART_CLI_TELEMETRY_PYTHON_VERSION || '3.13') }}
     services:
       postgres:
-        image: postgres:16
+        image: ${{ vars.AART_CLI_TELEMETRY_POSTGRES_IMAGE || 'postgres:16' }}
         env:
           POSTGRES_USER: telemetry
           POSTGRES_PASSWORD: telemetry
           POSTGRES_DB: telemetry
           POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=en-US
-        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U telemetry"
           --health-interval 2s --health-timeout 5s --health-retries 20
     env:
-      AART_CLI_TELEMETRY_TEST_POSTGRES_URL: postgresql+psycopg://telemetry:telemetry@127.0.0.1:5432/telemetry
+      AART_CLI_TELEMETRY_TEST_POSTGRES_URL: postgresql+psycopg://telemetry:telemetry@postgres:5432/telemetry
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - run: pipx install poetry==2.4.1
-      - run: poetry install --with dev --all-extras
-      - run: poetry run pytest -q tests/test_repository_contract.py
+      - uses: ./.github/actions/pip-index
+      - name: Install what poetry.lock pins
+        run: |
+          python scripts/locked_requirements.py main dev > "$RUNNER_TEMP/requirements.txt"
+          python -m pip install --require-hashes --no-deps --requirement "$RUNNER_TEMP/requirements.txt"
+          python -m pip install --no-deps --editable .
+      - run: python -m pytest -q tests/test_repository_contract.py
 
   image:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - run: docker build -t aart-cli-telemetry-server:ci .
-      - run: python scripts/image_smoke.py aart-cli-telemetry-server:ci
+      - uses: ./.github/actions/image
+
+  # Only from main, only once every check above passed, and only where a registry is named. The
+  # image is built and checked again here, as `image` does, so what is pushed is what was checked.
+  publish:
+    needs: [quality, postgresql, image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AART_CLI_TELEMETRY_IMAGE_REGISTRY != ''
+    runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
+    env:
+      REGISTRY: ${{ vars.AART_CLI_TELEMETRY_IMAGE_REGISTRY }}
+      REPOSITORY: ${{ vars.AART_CLI_TELEMETRY_IMAGE_REPOSITORY || 'aart-cli-telemetry-server' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/image
+      - name: Sign in to the registry
+        env:
+          USERNAME: ${{ secrets[vars.AART_CLI_TELEMETRY_IMAGE_USERNAME_SECRET_NAME] }}
+          PASSWORD: ${{ secrets[vars.AART_CLI_TELEMETRY_IMAGE_PASSWORD_SECRET_NAME] }}
+        run: |
+          if [ -z "$USERNAME" ]; then
+            echo "registry: no credentials named; the runner's own sign-in is used"
+            exit 0
+          fi
+          printf '%s' "$PASSWORD" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin
+      - name: Push the checked image
+        run: |
+          set -euo pipefail
+          for tag in "sha-${GITHUB_SHA::12}" main; do
+            docker tag aart-cli-telemetry-server:ci "$REGISTRY/$REPOSITORY:$tag"
+            docker push "$REGISTRY/$REPOSITORY:$tag"
+          done
+          echo "published $REGISTRY/$REPOSITORY:sha-${GITHUB_SHA::12}"
+      - name: Sign out of the registry
+        if: always()
+        run: docker logout "$REGISTRY" || true

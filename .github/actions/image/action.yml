@@ -1,0 +1,20 @@
+name: image
+description: >
+  Build the image as `aart-cli-telemetry-server:ci` from this copy's base image and index, and
+  check it the way a deployment uses it. One action, so the image a job publishes is built and
+  checked exactly as the one every pull request checks.
+
+runs:
+  using: composite
+  steps:
+  - uses: ./.github/actions/pip-index
+  # The index reaches the build as the `pip-index` secret, present only while pip runs, so neither
+  # it nor its credentials are in a layer.
+  - name: Build the image
+    shell: bash
+    run: >-
+      docker build --build-arg PYTHON_IMAGE="$AART_CLI_TELEMETRY_PYTHON_IMAGE"
+      --secret id=pip-index,env=PIP_INDEX_URL --tag aart-cli-telemetry-server:ci .
+  - name: Check the image
+    shell: bash
+    run: python3 scripts/image_smoke.py aart-cli-telemetry-server:ci
