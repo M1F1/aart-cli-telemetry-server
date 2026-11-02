@@ -6,8 +6,10 @@ from the index `PIP_INDEX_URL` names, then runs that Python with the arguments. 
 pulled beforehand, each with its own credentials (scripts/pull_image.py), so this signs in to
 nothing and pulls nothing.
 
-The checkout is copied into the container rather than mounted, so nothing the check writes
-reaches the runner, and it works where the runner's paths are not the Docker host's. With
+The files git tracks are copied into the container, as they are in the working tree, rather than
+mounted, so nothing the check writes reaches the runner, it works where the runner's paths are not
+the Docker host's, and no untracked file or cache is checked. Without git, the whole checkout is
+copied but for git's own directory. With
 `--postgres`, a PostgreSQL of that image runs beside it on a network of its own, trusting that
 network, and `AART_CLI_TELEMETRY_TEST_POSTGRES_URL` names it. Every container and network this
 makes is named after the run and removed at the end. It runs on the runner itself, under whatever
@@ -17,7 +19,10 @@ python3 it has, so it is held to Python 3.8.
 from __future__ import annotations
 
 import argparse
+import io
+import os
 import subprocess
+import tarfile
 import time
 import uuid
 from pathlib import Path
@@ -41,6 +46,37 @@ INSTALL_AND_RUN = (
 
 def docker(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["docker", *arguments], capture_output=True, text=True, check=check)
+
+
+def tracked(root: Path) -> list[str] | None:
+    """The files git tracks under `root` that the working tree has; `None` where git cannot say."""
+
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=False
+        )
+    except FileNotFoundError:
+        return None
+    if listing.returncode:
+        return None
+    names = listing.stdout.decode("utf-8").split("\0")
+    return [name for name in names if name and os.path.lexists(root / name)]
+
+
+def archive(root: Path, files: list[str] | None) -> bytes:
+    """A tar of `files`, or of all of `root` but `.git`, under `work/`, for `docker cp -`."""
+
+    def outside_git(member: tarfile.TarInfo) -> tarfile.TarInfo | None:
+        inside = member.name == "work/.git" or member.name.startswith("work/.git/")
+        return None if inside else member
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        if files is None:
+            tar.add(root, arcname="work", filter=outside_git)
+        for name in files or []:
+            tar.add(root / name, arcname=f"work/{name}", recursive=False)
+    return buffer.getvalue()
 
 
 def postgresql(image: str, name: str, network: str) -> str:
@@ -73,7 +109,10 @@ def check(image: str, postgres: str | None, arguments: list[str]) -> int:
             url = postgresql(postgres, f"{run}-postgres", run)
             created += ["--network", run, "--env", f"AART_CLI_TELEMETRY_TEST_POSTGRES_URL={url}"]
         docker("create", *created, image, "sh", "-c", INSTALL_AND_RUN, "sh", *arguments)
-        docker("cp", f"{ROOT}/.", f"{run}:/work")
+        copy = archive(ROOT, tracked(ROOT))
+        subprocess.run(
+            ["docker", "cp", "-", f"{run}:/"], input=copy, capture_output=True, check=True
+        )
         return subprocess.run(["docker", "start", "--attach", run], check=False).returncode
     finally:
         docker("rm", "--force", run, f"{run}-postgres", check=False)

@@ -27,6 +27,7 @@ from aart_cli_telemetry_server.web.app import create_app
 from deploy import Refused, Step, apply, describe, plan_for, read_environment, settings_for, smoke
 from deploy.targets import docker
 
+from .credential_fixtures import credential_url
 from .strategies import NOW
 
 _SAFE_KEYS = st.from_regex(r"[A-Z][A-Z0-9_]{0,15}", fullmatch=True).filter(
@@ -80,8 +81,9 @@ def test_a_key_that_names_a_secret_is_refused_without_its_value(key: str, value:
 
 @given(value=_SECRET_VALUES, scheme=st.sampled_from(["postgresql+psycopg", "https", "redis"]))
 def test_a_url_carrying_a_password_is_refused_without_it(value: str, scheme: str) -> None:
+    url = credential_url("db:5432", "/telemetry", scheme=scheme, user="telemetry", held=value)
     with pytest.raises(Refused) as refused:
-        read_environment(f"DATABASE={scheme}://telemetry:{value}@db:5432/telemetry\n")
+        read_environment(f"DATABASE={url}\n")
     assert "password in a URL" in str(refused.value)
     assert value not in str(refused.value)
 
@@ -308,7 +310,8 @@ def test_an_ingest_endpoint_behind_a_sign_in_fails_the_smoke_check() -> None:
 @given(password=_SECRET_VALUES)
 def test_an_address_with_a_password_is_refused_without_it(password: str) -> None:
     said: list[str] = []
-    assert smoke.check(f"https://user:{password}@telemetry.example", _answers(), said.append) == 2
+    address = credential_url("telemetry.example", held=password)
+    assert smoke.check(address, _answers(), said.append) == 2
     assert said == ["refused: the address may not carry a user name or password"]
     assert smoke.check("ftp://telemetry.example", _answers(), said.append) == 2
 

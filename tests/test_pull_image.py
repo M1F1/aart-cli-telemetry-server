@@ -16,7 +16,9 @@ from hypothesis import strategies as st
 
 from scripts.pull_image import pull, registry
 
-PASSWORD = "pull-password-under-test"  # noqa: S105 - a canary, not a credential
+from .credential_fixtures import held
+
+PASSWORD = held()
 
 
 class Docker:

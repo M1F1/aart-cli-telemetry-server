@@ -24,6 +24,8 @@ from aart_cli_telemetry_server.cli import (
     main,
 )
 
+from .credential_fixtures import credential_url, held
+
 
 def test_serve_refuses_beyond_loopback_without_a_proxy(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["serve", "--host", "0.0.0.0", "--data-dir", "/nonexistent"]) == 2
@@ -118,11 +120,13 @@ def test_backup_copies_and_a_refused_database_is_said_without_its_url(
     with sqlite3.connect(tmp_path / "copy.sqlite3") as connection:
         assert connection.execute("SELECT version FROM schema_info").fetchone() == (1,)
 
-    monkeypatch.setenv(DATABASE_URL_VARIABLE, "postgresql+nodriver://u:hunter2@db/x")
+    value = held()
+    url = credential_url("db", "/x", scheme="postgresql+nodriver", user="u", held=value)
+    monkeypatch.setenv(DATABASE_URL_VARIABLE, url)
     assert main(["backup", str(tmp_path / "other.sqlite3")]) == 1
     said = capsys.readouterr().err
     assert "the database cannot be used" in said
-    assert "hunter2" not in said
+    assert value not in said
 
 
 def test_serve_runs_the_app_on_the_database_it_opened(

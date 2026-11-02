@@ -122,8 +122,16 @@ poetry install --with dev
 make quality
 ```
 
-`make quality` is what CI runs: ruff (lint and format), mypy strict with the pydantic and returns
-plugins, tach (layers and declared dependencies), and the tests under coverage (95% branch minimum).
+`make quality` is what CI runs: the secret shape check, ruff (lint and format), mypy strict with
+the pydantic and returns plugins, tach (layers and declared dependencies), and the tests under
+coverage (95% branch minimum).
+
+The secret shape check (`make secret-shape-check`) refuses any tracked file with a literal in the
+shape of a credential: a URL with a user and a password, a credential-named key with a value, a
+token's prefix and length. Push protection on an organisation's Git host rejects that shape
+without reading intent, a test's made-up password included, and once such a value is in history
+only an exception lets it through. A test that needs one builds it at run time with
+`tests/credential_fixtures.py`, as aart-cli's tests do.
 Universal claims are Hypothesis properties. `make mutants` runs mutmut over `domain` and
 `application`; it is advisory, as in aart-cli, and survivors are findings to read. On 2026-10-29 it
 killed 379 of 399; the 20 left are equivalent: the wording of errors no reason repeats, the
