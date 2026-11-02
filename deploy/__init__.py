@@ -46,7 +46,7 @@ __all__ = [
 _KEY = re.compile(r"[A-Z][A-Z0-9_]*")
 #: A key whose name says it holds a secret, which an environment file never does.
 _SECRET_KEY = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|PRIVATE)", re.IGNORECASE)
-#: `scheme://user:password@` anywhere in a value.
+#: A scheme, then a user name and a password before the host's `@`, anywhere in a value.
 _URL_PASSWORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/@\s:]*:[^/@\s]*@")
 
 

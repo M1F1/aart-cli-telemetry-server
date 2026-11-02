@@ -10,6 +10,7 @@ import sys
 from collections.abc import Callable, Sequence
 
 GATES: tuple[tuple[str, ...], ...] = (
+    ("scripts.secret_shape_check",),
     ("ruff", "check", "."),
     ("ruff", "format", "--check", "."),
     ("mypy", "aart_cli_telemetry_server", "deploy", "tests", "scripts"),

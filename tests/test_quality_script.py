@@ -39,7 +39,10 @@ def test_it_passes_when_every_gate_does() -> None:
 def test_the_gates_are_what_the_makefile_s_own_targets_run() -> None:
     makefile = (Path(__file__).resolve().parent.parent / "Makefile").read_text("utf-8")
     commands: list[tuple[str, ...]] = []
-    for target in ("lint", "format-check", "typecheck", "tach", "coverage"):
+    for target in ("secret-shape-check", "lint", "format-check", "typecheck", "tach", "coverage"):
         recipe = makefile.split(f"\n{target}:\n", 1)[1].split("\n\n", 1)[0]
-        commands += [tuple(line.removeprefix("\t$(RUN) ").split()) for line in recipe.splitlines()]
+        commands += [
+            tuple(line.removeprefix("\t$(RUN) ").removeprefix("python -m ").split())
+            for line in recipe.splitlines()
+        ]
     assert commands == list(GATES)

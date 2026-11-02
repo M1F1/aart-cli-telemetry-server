@@ -1,4 +1,4 @@
-.PHONY: quality lint format format-check typecheck tach test coverage mutants image image-smoke deploy smoke
+.PHONY: quality secret-shape-check lint format format-check typecheck tach test coverage mutants image image-smoke deploy smoke
 
 POETRY ?= poetry
 RUN = $(POETRY) run
@@ -6,6 +6,10 @@ RUN = $(POETRY) run
 # Every gate, through scripts/quality.py, which CI runs too; the targets below run one each.
 quality:
 	$(RUN) python scripts/quality.py
+
+# No tracked file carries a literal in the shape of a credential (scripts/secret_shape_check.py).
+secret-shape-check:
+	$(RUN) python -m scripts.secret_shape_check
 
 lint:
 	$(RUN) ruff check .
