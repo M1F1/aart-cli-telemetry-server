@@ -79,12 +79,18 @@ aart-cli consume telemetry sync
 `http://` is accepted only for a loopback address; anything else must be `https://`. See aart-cli's
 consumer guide for what is sent and when.
 
-## Listening beyond loopback
+## Who may reach it
 
 Version 1 of the API carries no client credential, so `serve` refuses any address other than
-loopback unless `--behind-authenticating-proxy` says that a proxy or ingress in front authenticates
-every request, to the ingest endpoint and to the dashboard alike. Never expose the server to the
-Internet without one.
+loopback unless `--behind-authenticating-proxy`, or
+`AART_CLI_TELEMETRY_BEHIND_AUTHENTICATING_PROXY=true` in its environment, says that what is in front
+of it decides who reaches it. Any other value of that variable refuses to start.
+
+aart-cli sends no credential and cannot answer a sign-in, so what limits who may send events is
+where a request can come from: the organisation's network, a VPN, a private endpoint, a zero-trust
+access service -- whichever the organisation uses. The dashboard and `/api/v1/stats/*` may also sit
+behind the organisation's sign-in, with `/api/v1/events/batch` and `/healthz` left out of it.
+Never expose the server to the Internet unrestricted.
 
 ## Backup
 
@@ -133,7 +139,7 @@ names an interpreter that imports `aart_cli`, and is skipped otherwise.
 
 ## Container image
 
-The `Dockerfile` builds an image for a container platform such as AKS or Azure Container Apps:
+The `Dockerfile` builds an image for any container platform:
 
 ```bash
 docker build -t aart-cli-telemetry-server .
@@ -143,8 +149,9 @@ docker build -t aart-cli-telemetry-server .
   another. The `postgresql` extra is installed, so a PostgreSQL URL works without a rebuild. Pass the
   URL as a secret, since it can carry a password.
 - **It listens on `0.0.0.0:8000` only with `--behind-authenticating-proxy`** as the container's
-  argument. Without it the container refuses to start, as `serve` does elsewhere, because a
-  container's port is reachable from beyond its host.
+  argument, or `AART_CLI_TELEMETRY_BEHIND_AUTHENTICATING_PROXY=true` in its environment where a
+  platform sets variables more easily than arguments. Without either the container refuses to
+  start, as `serve` does elsewhere, because a container's port is reachable from beyond its host.
 - **It runs as uid 10001** with nothing writable but `/data`, so a read-only root filesystem works. A
   bind-mounted `/data` must be writable by that uid; a named volume is prepared by the image.
 - **Health** is `GET /healthz` on port 8000; point the platform's liveness and readiness probes at
@@ -156,10 +163,10 @@ To try it on this machine, publish the port to loopback only:
 docker run --rm -p 127.0.0.1:8000:8000 -v aart-cli-telemetry:/data aart-cli-telemetry-server --behind-authenticating-proxy
 ```
 
-SQLite needs a disk of its own: a block device such as an Azure Disk behind one replica. A network
-share such as Azure Files, the storage Azure Container Apps and App Service mount, does not give
-SQLite the locking WAL mode relies on. There, use PostgreSQL, such as Azure Database for PostgreSQL.
-Run one replica on SQLite; several replicas need PostgreSQL.
+SQLite needs a disk of its own: a block device behind one replica. A network file share, which
+many container platforms and managed application hosts mount as persistent storage, does not give
+SQLite the locking WAL mode relies on. There, use PostgreSQL, managed or your own. Run one replica
+on SQLite; several replicas need PostgreSQL.
 
 A consistent copy of the SQLite database, taken while the server runs:
 
@@ -178,14 +185,65 @@ docker exec CONTAINER aart-cli-telemetry-server backup /data/backup.sqlite3
 
 CI runs it on every change.
 
+## Deploying
+
+`deploy/` turns an environment file into the commands that deploy the image to a target, which is a
+parameter:
+
+```bash
+make deploy TARGET=docker ENVIRONMENT=deploy/environments/example-docker.env
+make deploy TARGET=docker ENVIRONMENT=deploy/environments/example-docker.env APPLY=1
+make smoke URL=https://telemetry.example
+```
+
+- **A target is a module in `deploy/targets/`**: the settings it reads and `plan(settings)`, the
+  commands with why each runs. It is found by its module alone. The server imports nothing from
+  `deploy/` and `deploy/` nothing from the server (`tach.toml`, `tests/test_architecture.py`), so a
+  platform never becomes part of the server.
+- **Without `APPLY=1` the plan is printed** and nothing runs. With it each step runs in turn, and the
+  first that fails stops the rest.
+- **An environment file is meant to be committed**, so it holds names, addresses and references,
+  never a secret: a key that names one (`*_PASSWORD`, `*_TOKEN`, `*_SECRET` and the like) or a URL
+  carrying a password is refused, and no refusal repeats a value. A secret reaches the server by
+  reference to where the platform keeps secrets, or from a file only the host reads.
+- **`docker`** runs the image on this machine, or on another through `DOCKER_CONTEXT`: it pulls the
+  image (unless `PULL=false`), replaces the container of the same name on the same volume, sets
+  `AART_CLI_TELEMETRY_BEHIND_AUTHENTICATING_PROXY=true`, publishes port 8000 on `PUBLISH`
+  (`127.0.0.1:8000` unless set) for whatever the host puts in front, and waits until the image's
+  health check reports healthy. A PostgreSQL URL comes from `SECRETS_FILE`, which Docker reads and
+  this never does. See `deploy/environments/example-docker.env`.
+- **`make smoke URL=...`** (`python -m deploy.smoke`) checks a deployed server from where aart-cli
+  runs, through the same network, and stores nothing: `GET /healthz` is 200; `POST
+  /api/v1/events/batch` with `{}` is 422, so the ingest endpoint is reachable with no sign-in; and
+  whether `GET /dashboard` is served or has a sign-in in front of it.
+
+## Your own copy
+
+To deploy somewhere this repository has no target for, keep a copy of it on your organisation's own
+Git host, rather than a fork, which GitHub keeps as public as this repository:
+
+```bash
+git clone https://github.com/M1F1/aart-cli-telemetry-server.git
+cd aart-cli-telemetry-server
+git remote rename origin upstream
+git remote set-url --push upstream no-push
+git remote add origin YOUR-REPOSITORY-URL
+git push -u origin main
+```
+
+Add your target as `deploy/targets/NAME.py` with its tests as `tests/test_deploy_NAME.py`, and your
+environments as `deploy/environments/NAME.env`. This repository keeps only `docker.py` and
+`example-*.env` there, so taking its changes never conflicts with yours:
+
+```bash
+git fetch upstream
+git merge upstream/main
+```
+
 ## Not yet
 
-The rest of the deployment to AKS is the next stage and is not in this repository yet:
-
-- publishing the image to a registry;
-- manifests for one replica on a persistent disk;
-- an authenticating ingress;
-- scheduled backups and a tested restore.
+- Publishing the image to a registry.
+- Scheduled backups and a tested restore.
 
 ## Licence
 

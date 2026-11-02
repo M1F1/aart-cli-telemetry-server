@@ -1,9 +1,12 @@
 """`aart-cli-telemetry-server serve | backup`: the composition root.
 
 This is where the shell is assembled: which database, which clock, which address. `serve` listens on
-loopback unless told it sits behind an authenticating proxy: version 1 of the API carries no client
-credential, so a server reachable from elsewhere without one in front would accept anybody's events
-and show anybody the dashboard.
+loopback unless told it sits behind an authenticating proxy, by `--behind-authenticating-proxy` or
+by `$AART_CLI_TELEMETRY_BEHIND_AUTHENTICATING_PROXY=true` where a platform sets variables more
+easily than arguments: version 1 of the API carries no client credential, so a server reachable
+from elsewhere without one in front would accept anybody's events and show anybody the dashboard.
+Any value of that variable but `true` or `false` refuses to start, so a mistyped one never opens a
+port.
 
 The database is `$AART_CLI_TELEMETRY_DATABASE_URL` when set -- any URL SQLAlchemy reads, such as a
 PostgreSQL one -- and otherwise SQLite in the data directory. A URL can carry a password, so it is
@@ -26,6 +29,7 @@ from .effects import perform
 from .web.app import create_app
 
 __all__ = [
+    "BEHIND_PROXY_VARIABLE",
     "DATABASE_URL_VARIABLE",
     "DATA_DIR_VARIABLE",
     "database_url",
@@ -36,6 +40,7 @@ __all__ = [
 
 DATA_DIR_VARIABLE = "AART_CLI_TELEMETRY_DATA_DIR"
 DATABASE_URL_VARIABLE = "AART_CLI_TELEMETRY_DATABASE_URL"
+BEHIND_PROXY_VARIABLE = "AART_CLI_TELEMETRY_BEHIND_AUTHENTICATING_PROXY"
 
 
 def default_data_dir() -> str:
@@ -53,6 +58,15 @@ def database_url(data_dir: str | None = None) -> str:
     if configured and data_dir is None:
         return configured
     return sqlite_url(os.path.abspath(data_dir or default_data_dir()))
+
+
+def behind_proxy_variable() -> bool | None:
+    """What `$AART_CLI_TELEMETRY_BEHIND_AUTHENTICATING_PROXY` says; unset is false, and a value it
+    cannot have is `None`."""
+
+    return {"": False, "false": False, "true": True}.get(
+        os.environ.get(BEHIND_PROXY_VARIABLE, "").strip().lower()
+    )
 
 
 def is_loopback(host: str) -> bool:
@@ -79,7 +93,10 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--behind-authenticating-proxy",
         action="store_true",
-        help="listen beyond loopback; only when a proxy or ingress authenticates every request",
+        help=(
+            "listen beyond loopback; only when a proxy or ingress authenticates every request "
+            f"(or ${BEHIND_PROXY_VARIABLE}=true)"
+        ),
     )
 
     backup = commands.add_parser("backup", help="copy a SQLite database consistently while it runs")
@@ -90,18 +107,20 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
-    if (
-        arguments.command == "serve"
-        and not is_loopback(arguments.host)
-        and not arguments.behind_authenticating_proxy
-    ):
-        print(
-            f"refusing to listen on {arguments.host}: version 1 of the API carries no client "
-            "credential. Listen on 127.0.0.1, or put an authenticating proxy in front and pass "
-            "--behind-authenticating-proxy.",
-            file=sys.stderr,
-        )
-        return 2
+    if arguments.command == "serve":
+        named = behind_proxy_variable()
+        if named is None:
+            print(f"refusing to start: ${BEHIND_PROXY_VARIABLE} is true or false", file=sys.stderr)
+            return 2
+        arguments.behind_authenticating_proxy = arguments.behind_authenticating_proxy or named
+        if not is_loopback(arguments.host) and not arguments.behind_authenticating_proxy:
+            print(
+                f"refusing to listen on {arguments.host}: version 1 of the API carries no client "
+                "credential. Listen on 127.0.0.1, or put an authenticating proxy in front and pass "
+                f"--behind-authenticating-proxy or set ${BEHIND_PROXY_VARIABLE}=true.",
+                file=sys.stderr,
+            )
+            return 2
 
     match perform(open_repository(database_url(arguments.data_dir))):
         case Failure(error):
