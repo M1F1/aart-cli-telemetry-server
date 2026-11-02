@@ -6,7 +6,8 @@
 # without them it refuses to start, as `serve` does. Version 1 of the API carries no client
 # credential, so the deployment must put an authenticating proxy or ingress in front.
 #
-# PYTHON_IMAGE is the base, any Debian-based image with Python 3.11 or later. The packages come
+# PYTHON_IMAGE is the base, any Debian-based image with Python 3.11 or later whose Python has venv
+# and ensurepip and which has useradd, as the official python images do. The packages come
 # from pip's index, or from the one the build secret `pip-index` holds (a URL, with its credentials
 # where it needs them), present only while the step that installs runs and never in a layer:
 #   docker build --secret id=pip-index,env=PIP_INDEX_URL .
