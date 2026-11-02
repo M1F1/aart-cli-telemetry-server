@@ -210,7 +210,7 @@ make smoke URL=https://telemetry.example
   image (unless `PULL=false`), replaces the container of the same name on the same volume, sets
   `AART_CLI_TELEMETRY_BEHIND_AUTHENTICATING_PROXY=true`, publishes port 8000 on `PUBLISH`
   (`127.0.0.1:8000` unless set) for whatever the host puts in front, and waits until the image's
-  health check reports healthy. A PostgreSQL URL comes from `SECRETS_FILE`, which Docker reads and
+  health check reports healthy. A PostgreSQL URL comes from `ENV_FILE`, which Docker reads and
   this never does. See `deploy/environments/example-docker.env`.
 - **`make smoke URL=...`** (`python -m deploy.smoke`) checks a deployed server from where aart-cli
   runs, through the same network, and stores nothing: `GET /healthz` is 200; `POST
