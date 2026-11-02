@@ -11,9 +11,15 @@ permissions:
 # What a copy of this repository differs in is a variable of its own (Settings, Secrets and
 # variables, Actions), with this repository's value as the fallback; README.md, "Your
 # organisation's copy", lists them. A secret is named by a variable, never read by a fixed name.
+#
+# Each check in a container appears twice because a `credentials` block cannot be made
+# conditional: an empty one and a `null` one are both refused before the job starts, as aart-cli
+# found. So the choice is made with `if:`, by whether pull credentials are named, and the two jobs
+# share every step through `.github/actions/install`. Name none and only the first of each runs.
 env:
   AART_CLI_TELEMETRY_INDEX_URL: ${{ vars.AART_CLI_TELEMETRY_PIP_INDEX_URL || 'https://pypi.org/simple' }}
   AART_CLI_TELEMETRY_INDEX_CREDENTIALS: ${{ secrets[vars.AART_CLI_TELEMETRY_PIP_INDEX_CREDENTIALS_SECRET_NAME] }}
+  AART_CLI_TELEMETRY_PYTHON: ${{ vars.AART_CLI_TELEMETRY_PYTHON || 'python' }}
   AART_CLI_TELEMETRY_PYTHON_IMAGE: ${{ vars.AART_CLI_TELEMETRY_PYTHON_IMAGE || 'python:3.13-slim-bookworm' }}
   AART_CLI_TELEMETRY_POSTGRES_IMAGE: ${{ vars.AART_CLI_TELEMETRY_POSTGRES_IMAGE }}
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -21,26 +27,38 @@ env:
 
 jobs:
   quality:
+    if: vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME == ''
     runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
-    container: ${{ format('{0}:{1}', vars.AART_CLI_TELEMETRY_CI_PYTHON_IMAGE || 'python', matrix.python-version) }}
+    container: ${{ matrix.image }}
     strategy:
       matrix:
-        python-version: ${{ fromJSON(vars.AART_CLI_TELEMETRY_PYTHON_VERSIONS || '["3.11", "3.13"]') }}
+        image: ${{ fromJSON(vars.AART_CLI_TELEMETRY_CI_IMAGES || '["python:3.13", "python:3.11"]') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/pip-index
-      # pip installs what poetry.lock pins, every hash checked, so the index is a variable rather
-      # than a source edited into pyproject.toml (scripts/locked_requirements.py).
-      - name: Install what poetry.lock pins
-        run: |
-          python scripts/locked_requirements.py main dev > "$RUNNER_TEMP/requirements.txt"
-          python -m pip install --require-hashes --no-deps --requirement "$RUNNER_TEMP/requirements.txt"
-          python -m pip install --no-deps --editable .
-      - run: make quality RUN=
+      - uses: ./.github/actions/install
+      - run: '"$AART_CLI_TELEMETRY_PYTHON" scripts/quality.py'
 
-  postgresql:
+  quality-pulled-with-credentials:
+    if: vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME != ''
     runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
-    container: ${{ format('{0}:{1}', vars.AART_CLI_TELEMETRY_CI_PYTHON_IMAGE || 'python', vars.AART_CLI_TELEMETRY_PYTHON_VERSION || '3.13') }}
+    container:
+      image: ${{ matrix.image }}
+      credentials:
+        username: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME] }}
+        password: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_PASSWORD_SECRET_NAME] }}
+    strategy:
+      matrix:
+        image: ${{ fromJSON(vars.AART_CLI_TELEMETRY_CI_IMAGES || '["python:3.13", "python:3.11"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install
+      - run: '"$AART_CLI_TELEMETRY_PYTHON" scripts/quality.py'
+
+  # The first CI image runs the PostgreSQL check.
+  postgresql:
+    if: vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME == ''
+    runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
+    container: ${{ fromJSON(vars.AART_CLI_TELEMETRY_CI_IMAGES || '["python:3.13", "python:3.11"]')[0] }}
     services:
       postgres:
         image: ${{ vars.AART_CLI_TELEMETRY_POSTGRES_IMAGE || 'postgres:16' }}
@@ -56,33 +74,77 @@ jobs:
       AART_CLI_TELEMETRY_TEST_POSTGRES_URL: postgresql+psycopg://telemetry:telemetry@postgres:5432/telemetry
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/pip-index
-      - name: Install what poetry.lock pins
-        run: |
-          python scripts/locked_requirements.py main dev > "$RUNNER_TEMP/requirements.txt"
-          python -m pip install --require-hashes --no-deps --requirement "$RUNNER_TEMP/requirements.txt"
-          python -m pip install --no-deps --editable .
-      - run: python -m pytest -q tests/test_repository_contract.py
+      - uses: ./.github/actions/install
+      - run: '"$AART_CLI_TELEMETRY_PYTHON" -m pytest -q tests/test_repository_contract.py'
 
+  postgresql-pulled-with-credentials:
+    if: vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME != ''
+    runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
+    container:
+      image: ${{ fromJSON(vars.AART_CLI_TELEMETRY_CI_IMAGES || '["python:3.13", "python:3.11"]')[0] }}
+      credentials:
+        username: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME] }}
+        password: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_PASSWORD_SECRET_NAME] }}
+    services:
+      postgres:
+        image: ${{ vars.AART_CLI_TELEMETRY_POSTGRES_IMAGE || 'postgres:16' }}
+        credentials:
+          username: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME] }}
+          password: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_PASSWORD_SECRET_NAME] }}
+        env:
+          POSTGRES_USER: telemetry
+          POSTGRES_PASSWORD: telemetry
+          POSTGRES_DB: telemetry
+          POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=en-US
+        options: >-
+          --health-cmd "pg_isready -U telemetry"
+          --health-interval 2s --health-timeout 5s --health-retries 20
+    env:
+      AART_CLI_TELEMETRY_TEST_POSTGRES_URL: postgresql+psycopg://telemetry:telemetry@postgres:5432/telemetry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install
+      - run: '"$AART_CLI_TELEMETRY_PYTHON" -m pytest -q tests/test_repository_contract.py'
+
+  # Runs on the runner itself, which needs Docker with BuildKit and python3.
   image:
     runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
+    env:
+      AART_CLI_TELEMETRY_PULL_REGISTRY: ${{ vars.AART_CLI_TELEMETRY_PULL_REGISTRY }}
+      AART_CLI_TELEMETRY_PULL_USERNAME: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME] }}
+      AART_CLI_TELEMETRY_PULL_PASSWORD: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_PASSWORD_SECRET_NAME] }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/image
 
-  # Only from main, only once every check above passed, and only where a registry is named. The
-  # image is built and checked again here, as `image` does, so what is pushed is what was checked.
+  # Only from main, only once every check passed in whichever variant ran, and only where a
+  # registry is named. The image is built and checked again here, as `image` does, so what is
+  # pushed is what was checked.
   publish:
-    needs: [quality, postgresql, image]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AART_CLI_TELEMETRY_IMAGE_REGISTRY != ''
+    needs:
+      - quality
+      - quality-pulled-with-credentials
+      - postgresql
+      - postgresql-pulled-with-credentials
+      - image
+    if: >-
+      !cancelled()
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && vars.AART_CLI_TELEMETRY_IMAGE_REGISTRY != ''
+      && needs.image.result == 'success'
+      && (needs.quality.result == 'success' || needs.quality-pulled-with-credentials.result == 'success')
+      && (needs.postgresql.result == 'success' || needs.postgresql-pulled-with-credentials.result == 'success')
     runs-on: ${{ fromJSON(vars.AART_CLI_TELEMETRY_RUNNER || '["ubuntu-latest"]') }}
     env:
+      AART_CLI_TELEMETRY_PULL_REGISTRY: ${{ vars.AART_CLI_TELEMETRY_PULL_REGISTRY }}
+      AART_CLI_TELEMETRY_PULL_USERNAME: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_USERNAME_SECRET_NAME] }}
+      AART_CLI_TELEMETRY_PULL_PASSWORD: ${{ secrets[vars.AART_CLI_TELEMETRY_PULL_PASSWORD_SECRET_NAME] }}
       REGISTRY: ${{ vars.AART_CLI_TELEMETRY_IMAGE_REGISTRY }}
       REPOSITORY: ${{ vars.AART_CLI_TELEMETRY_IMAGE_REPOSITORY || 'aart-cli-telemetry-server' }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/image
-      - name: Sign in to the registry
+      - name: Sign in to the registry the image is published to
         env:
           USERNAME: ${{ secrets[vars.AART_CLI_TELEMETRY_IMAGE_USERNAME_SECRET_NAME] }}
           PASSWORD: ${{ secrets[vars.AART_CLI_TELEMETRY_IMAGE_PASSWORD_SECRET_NAME] }}
@@ -100,6 +162,6 @@ jobs:
             docker push "$REGISTRY/$REPOSITORY:$tag"
           done
           echo "published $REGISTRY/$REPOSITORY:sha-${GITHUB_SHA::12}"
-      - name: Sign out of the registry
+      - name: Sign out of the registry the image is published to
         if: always()
         run: docker logout "$REGISTRY" || true

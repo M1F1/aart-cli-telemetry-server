@@ -3,7 +3,9 @@
 POETRY ?= poetry
 RUN = $(POETRY) run
 
-quality: lint format-check typecheck tach coverage
+# Every gate, through scripts/quality.py, which CI runs too; the targets below run one each.
+quality:
+	$(RUN) python scripts/quality.py
 
 lint:
 	$(RUN) ruff check .
