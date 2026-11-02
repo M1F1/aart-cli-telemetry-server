@@ -145,9 +145,16 @@ def test_docker_replaces_the_container_on_the_same_volume_and_waits_for_health()
     assert (steps[4].until, steps[4].attempts) == ("healthy", 90)
 
 
+@pytest.mark.parametrize("name", sorted(deploy.known_targets()))
+def test_every_setting_a_target_reads_can_be_written_in_an_environment_file(name: str) -> None:
+    target = deploy.known_targets()[name]
+    for key in (*target.REQUIRED, *target.OPTIONAL):
+        assert read_environment(f"{key}=x") == {key: "x"}
+
+
 def test_docker_on_another_host_names_its_context_in_every_command() -> None:
     commands = _commands(
-        {"IMAGE": "i", "DOCKER_CONTEXT": "telemetry-host", "SECRETS_FILE": "/srv/t.env"}
+        {"IMAGE": "i", "DOCKER_CONTEXT": "telemetry-host", "ENV_FILE": "/srv/t.env"}
     )
     assert all(command[:3] == ("docker", "--context", "telemetry-host") for command in commands)
     run = commands[3]
