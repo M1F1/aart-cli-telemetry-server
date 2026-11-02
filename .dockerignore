@@ -4,5 +4,6 @@
 !README.md
 !LICENSE
 !aart_cli_telemetry_server/
+!scripts/locked_requirements.py
 **/__pycache__
 **/*.pyc

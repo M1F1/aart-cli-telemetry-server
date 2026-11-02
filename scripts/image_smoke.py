@@ -7,6 +7,7 @@ makes is named after this run and removed at the end.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -21,7 +22,10 @@ from typing import Any
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "contract" / "telemetry-api-v1.examples.json"
 PROXY = "--behind-authenticating-proxy"
-POSTGRES_IMAGE = "postgres:16-alpine"
+#: The PostgreSQL image the check runs the server against; a copy names its own mirror of one.
+POSTGRES_IMAGE = (
+    os.environ.get("AART_CLI_TELEMETRY_POSTGRES_IMAGE", "").strip() or "postgres:16-alpine"
+)
 
 
 def docker(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:

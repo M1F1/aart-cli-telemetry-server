@@ -137,6 +137,11 @@ to, the test that holds artifact ids in code-point order passes even without the
 "C"`. `tests/test_e2e_aart_cli.py` runs a real aart-cli against a real server when `AART_CLI_PYTHON`
 names an interpreter that imports `aart_cli`, and is skipped otherwise.
 
+CI installs without Poetry: `scripts/locked_requirements.py` prints what `poetry.lock` pins, every
+hash with it, and pip installs that, as aart-cli's CI does. Poetry takes an index only from a
+source in `pyproject.toml`, which would change the hash the lock is checked against, while pip
+reads `PIP_INDEX_URL`, so a copy that installs from its own index sets a variable and edits no file.
+
 ## Container image
 
 The `Dockerfile` builds an image for any container platform:
@@ -145,6 +150,14 @@ The `Dockerfile` builds an image for any container platform:
 docker build -t aart-cli-telemetry-server .
 ```
 
+- **What it installs is what `poetry.lock` pins**, by pip with every hash checked. `PYTHON_IMAGE` is
+  the base, any Debian-based image with Python 3.11 or later. The packages come from pip's index, or
+  from the one the build secret `pip-index` holds (a URL, with credentials where it needs them),
+  which is present only while pip runs and never in a layer:
+
+  ```bash
+  docker build --build-arg PYTHON_IMAGE=python:3.13-slim-bookworm --secret id=pip-index,env=PIP_INDEX_URL -t aart-cli-telemetry-server .
+  ```
 - **The database is SQLite on the `/data` volume** unless `AART_CLI_TELEMETRY_DATABASE_URL` names
   another. The `postgresql` extra is installed, so a PostgreSQL URL works without a rebuild. Pass the
   URL as a secret, since it can carry a password.
@@ -217,23 +230,36 @@ make smoke URL=https://telemetry.example
   /api/v1/events/batch` with `{}` is 422, so the ingest endpoint is reachable with no sign-in; and
   whether `GET /dashboard` is served or has a sign-in in front of it.
 
-## Your own copy
+## Your organisation's copy
 
-To deploy somewhere this repository has no target for, keep a copy of it on your organisation's own
-Git host, rather than a fork, which GitHub keeps as public as this repository:
+A copy of this repository on your organisation's own Git host differs from it only in GitHub
+Actions variables (Settings, Secrets and variables, Actions). Each has this repository's value as
+its fallback, and a secret is named by a variable, never read by a fixed name, as in aart-cli:
 
-```bash
-git clone https://github.com/M1F1/aart-cli-telemetry-server.git
-cd aart-cli-telemetry-server
-git remote rename origin upstream
-git remote set-url --push upstream no-push
-git remote add origin YOUR-REPOSITORY-URL
-git push -u origin main
-```
+| Variable | What it sets | Unset |
+|---|---|---|
+| `AART_CLI_TELEMETRY_RUNNER` | the runner labels, as JSON | `["ubuntu-latest"]` |
+| `AART_CLI_TELEMETRY_CI_PYTHON_IMAGE` | the image the checks run in, tagged with each Python version | `python` |
+| `AART_CLI_TELEMETRY_PYTHON_VERSIONS` | the Python versions `quality` runs under, as JSON | `["3.11", "3.13"]` |
+| `AART_CLI_TELEMETRY_PYTHON_VERSION` | the Python version of the PostgreSQL check | `3.13` |
+| `AART_CLI_TELEMETRY_PIP_INDEX_URL` | the package index | `https://pypi.org/simple` |
+| `AART_CLI_TELEMETRY_PIP_INDEX_CREDENTIALS_SECRET_NAME` | the secret holding the index's `user:password` | none |
+| `AART_CLI_TELEMETRY_PYTHON_IMAGE` | the image's base | `python:3.13-slim-bookworm` |
+| `AART_CLI_TELEMETRY_POSTGRES_IMAGE` | the PostgreSQL image the checks run against | `postgres:16`, `postgres:16-alpine` |
+| `AART_CLI_TELEMETRY_IMAGE_REGISTRY` | the registry the image is published to | not published |
+| `AART_CLI_TELEMETRY_IMAGE_REPOSITORY` | the image's repository there | `aart-cli-telemetry-server` |
+| `AART_CLI_TELEMETRY_IMAGE_USERNAME_SECRET_NAME` | the secret holding the registry user name | the runner's own sign-in |
+| `AART_CLI_TELEMETRY_IMAGE_PASSWORD_SECRET_NAME` | the secret holding the registry password or token | the runner's own sign-in |
 
-Add your target as `deploy/targets/NAME.py` with its tests as `tests/test_deploy_NAME.py`, and your
-environments as `deploy/environments/NAME.env`. This repository keeps only `docker.py` and
-`example-*.env` there, so taking its changes never conflicts with yours:
+With a registry named, every change on `main` that passes every check is built and checked again,
+then pushed as `REGISTRY/REPOSITORY:sha-<first 12 of the commit>` and `:main`. A deployment names
+the `sha-` tag, so it changes only when it is told to. Give the registry credential the right to
+push to that one repository and nothing else.
+
+A copy that deploys with a target of its own adds it as `deploy/targets/NAME.py`, its tests as
+`tests/test_deploy_NAME.py`, and its environments as `deploy/environments/NAME.env`. This
+repository keeps only `docker.py` and `example-*.env` there, so taking its changes, with this
+repository as the remote `upstream`, never conflicts with them:
 
 ```bash
 git fetch upstream
@@ -242,7 +268,7 @@ git merge upstream/main
 
 ## Not yet
 
-- Publishing the image to a registry.
+- Pulling a CI image from a registry that needs credentials.
 - Scheduled backups and a tested restore.
 
 ## Licence
