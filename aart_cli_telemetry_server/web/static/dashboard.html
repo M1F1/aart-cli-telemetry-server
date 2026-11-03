@@ -33,10 +33,37 @@
     <div class="chart"><canvas id="lifecycle"></canvas></div>
   </section>
   <section class="panel">
-    <h2>Most used artifacts</h2>
+    <h2>Artifacts</h2>
+    <p class="muted">Every artifact aart-cli installed, updated or removed, or a harness used. A plugin's skill is its own row, named <code>plugin:skill</code>; the plugin's row adds its skills' uses. Choose a row for its detail.</p>
+    <div class="filters">
+      <input id="search" type="search" placeholder="Name" aria-label="Name" maxlength="200">
+      <label>Kind <select id="kind"><option value="">any</option><option>plugin</option><option>skill</option><option>mcp</option><option>agent</option><option>command</option><option>collection</option></select></label>
+      <label>Order <select id="order"><option value="installs">installs</option><option value="uses">uses</option><option value="holders">installations holding it</option><option value="recent">latest</option><option value="name">name</option></select></label>
+    </div>
     <table>
-      <thead><tr><th>Artifact</th><th>Kind</th><th class="number">Uses</th><th class="number">Installations using it</th><th class="number">Installs</th><th>Last used (UTC)</th></tr></thead>
-      <tbody id="top"></tbody>
+      <thead><tr><th>Artifact</th><th>Kind</th><th>Latest version</th><th class="number">Installs</th><th class="number">Updates</th><th class="number">Removals</th><th class="number">Holding it now</th><th class="number">Uses</th><th class="number">Its skills' uses</th><th class="number">Installations using it</th><th>Last seen (UTC)</th></tr></thead>
+      <tbody id="artifacts"></tbody>
+    </table>
+  </section>
+  <section class="panel" id="detail" hidden>
+    <h2 id="detail-title"></h2>
+    <p class="muted" id="detail-meta"></p>
+    <h3>Versions</h3>
+    <table>
+      <thead><tr><th>Version</th><th class="number">Installs</th><th class="number">Updates</th><th class="number">Removals</th><th class="number">Uses</th><th>Last seen (UTC)</th></tr></thead>
+      <tbody id="detail-versions"></tbody>
+    </table>
+    <div id="detail-members-block">
+      <h3>Its skills</h3>
+      <table>
+        <thead><tr><th>Skill</th><th class="number">Installs</th><th class="number">Holding it now</th><th class="number">Uses</th><th class="number">Installations using it</th><th>Last seen (UTC)</th></tr></thead>
+        <tbody id="detail-members"></tbody>
+      </table>
+    </div>
+    <h3>Latest events</h3>
+    <table>
+      <thead><tr><th>When (UTC)</th><th>Event</th><th>Artifact</th><th>Version</th><th>Source</th><th>Installation</th><th>aart-cli</th></tr></thead>
+      <tbody id="detail-events"></tbody>
     </table>
   </section>
   <section class="panel">
@@ -60,6 +87,6 @@
     <div class="chart short"><canvas id="sources"></canvas></div>
   </section>
 </main>
-<footer class="muted">Counts come from aart-cli installations that turned telemetry on. An installation is a pseudonymous id, not a person.</footer>
+<footer class="muted">Counts come from aart-cli installations that turned telemetry on. An installation is a pseudonymous id, not a person. The API is described at <a href="/docs">/docs</a>.</footer>
 </body>
 </html>

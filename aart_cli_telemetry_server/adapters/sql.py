@@ -56,6 +56,18 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.types import TypeDecorator
 
 from aart_cli_telemetry_server.application.ports import StorageError
+from aart_cli_telemetry_server.domain.artifacts import (
+    MANAGED,
+    MAX_EVENTS,
+    ClientVersion,
+    EventView,
+    Holding,
+    Reach,
+    Selection,
+    Tally,
+    ordered_versions,
+    tally_key,
+)
 from aart_cli_telemetry_server.domain.events import (
     Cause,
     Event,
@@ -496,6 +508,173 @@ class SqlEventRepository:
             )
         )
 
+    # -- the read model -------------------------------------------------------------------------
+
+    def tallies(self, selection: Selection) -> IOResult[tuple[Tally, ...], StorageError]:
+        grouped = (
+            events.c.artifact_type,
+            events.c.artifact_id,
+            events.c.artifact_version,
+            events.c.event_type,
+            events.c.source,
+            events.c.occurred_day,
+        )
+        statement = (
+            select(
+                *grouped,
+                func.count(),
+                func.min(events.c.occurred_at),
+                func.max(events.c.occurred_at),
+            )
+            .where(_selected(selection) & _of(MANAGED))
+            .group_by(*grouped)
+        )
+        return self._rows(statement).map(
+            lambda rows: tuple(
+                sorted(
+                    (
+                        Tally(
+                            kind,
+                            name,
+                            version,
+                            EventType(event_type),
+                            Source(source),
+                            _day(day),
+                            int(n),
+                            _aware(first),
+                            _aware(last),
+                        )
+                        for kind, name, version, event_type, source, day, n, first, last in rows
+                    ),
+                    key=tally_key,
+                )
+            )
+        )
+
+    def reach(self, selection: Selection) -> IOResult[tuple[Reach, ...], StorageError]:
+        grouped = (events.c.artifact_type, events.c.artifact_id, events.c.event_type)
+        statement = (
+            select(*grouped, func.count(distinct(events.c.client_id)))
+            .where(_selected(selection) & _of(MANAGED))
+            .group_by(*grouped)
+        )
+        return self._rows(statement).map(
+            lambda rows: tuple(
+                sorted(
+                    (
+                        Reach(kind, name, EventType(event_type), int(n))
+                        for kind, name, event_type, n in rows
+                    ),
+                    key=lambda item: (item.artifact_type, item.artifact_id, item.event_type.value),
+                )
+            )
+        )
+
+    def holdings(self, selection: Selection) -> IOResult[tuple[Holding, ...], StorageError]:
+        held = func.max(case((_of(_HELD), events.c.occurred_at))).label("held")
+        removed = func.max(
+            case((events.c.event_type == EventType.REMOVED.value, events.c.occurred_at))
+        ).label("removed")
+        per_client = (
+            select(events.c.artifact_type, events.c.artifact_id, held, removed)
+            .where(_selected(selection) & _of(_LIFECYCLE))
+            .group_by(events.c.artifact_type, events.c.artifact_id, events.c.client_id)
+            .subquery()
+        )
+        holds = per_client.c.held.is_not(None) & (
+            per_client.c.removed.is_(None) | (per_client.c.held > per_client.c.removed)
+        )
+        statement = select(
+            per_client.c.artifact_type,
+            per_client.c.artifact_id,
+            func.sum(case((holds, 1), else_=0)),
+        ).group_by(per_client.c.artifact_type, per_client.c.artifact_id)
+        return self._rows(statement).map(
+            lambda rows: tuple(
+                sorted(
+                    (Holding(kind, name, int(n or 0)) for kind, name, n in rows),
+                    key=lambda item: (item.artifact_type, item.artifact_id),
+                )
+            )
+        )
+
+    def recent(
+        self, selection: Selection, limit: int, before: tuple[datetime, str] | None
+    ) -> IOResult[tuple[EventView, ...], StorageError]:
+        if not 1 <= limit <= MAX_EVENTS:
+            raise ValueError(f"a page is 1 to {MAX_EVENTS} events long")
+        held = _selected(selection)
+        if before is not None:
+            moment, name = before
+            held &= (events.c.occurred_at < moment) | (
+                (events.c.occurred_at == moment) & (self._by_name(events.c.event_id) < name)
+            )
+        statement = (
+            select(
+                events.c.event_id,
+                events.c.occurred_at,
+                events.c.event_type,
+                events.c.source,
+                events.c.artifact_type,
+                events.c.artifact_id,
+                events.c.artifact_version,
+                events.c.client_id,
+                events.c.client_version,
+                _automated,
+            )
+            .where(held)
+            .order_by(events.c.occurred_at.desc(), self._by_name(events.c.event_id).desc())
+            .limit(limit)
+        )
+        return self._rows(statement).map(
+            lambda rows: tuple(
+                EventView(
+                    name,
+                    _aware(moment),
+                    EventType(event_type),
+                    Source(source),
+                    kind,
+                    artifact,
+                    version,
+                    client,
+                    client_version,
+                    bool(automated),
+                )
+                for (
+                    name,
+                    moment,
+                    event_type,
+                    source,
+                    kind,
+                    artifact,
+                    version,
+                    client,
+                    client_version,
+                    automated,
+                ) in rows
+            )
+        )
+
+    def client_versions(
+        self, selection: Selection
+    ) -> IOResult[tuple[ClientVersion, ...], StorageError]:
+        statement = (
+            select(
+                events.c.client_version,
+                func.count(distinct(events.c.client_id)),
+                func.count(),
+                func.max(events.c.occurred_at),
+            )
+            .where(_selected(selection))
+            .group_by(events.c.client_version)
+        )
+        return self._rows(statement).map(
+            lambda rows: ordered_versions(
+                ClientVersion(version, int(clients), int(n), _aware(last))
+                for version, clients, n, last in rows
+            )
+        )
+
     # -- SQLite only ----------------------------------------------------------------------------
 
     def backup(self, target: str) -> IOResult[str, StorageError]:
@@ -518,6 +697,47 @@ class SqlEventRepository:
             return str(destination)
 
         return _guarded(copy)
+
+
+_LIFECYCLE = frozenset({EventType.INSTALLED, EventType.UPDATED, EventType.REMOVED})
+_HELD = frozenset({EventType.INSTALLED, EventType.UPDATED})
+
+
+def _of(kinds: frozenset[EventType]) -> Any:
+    return events.c.event_type.in_(sorted(kind.value for kind in kinds))
+
+
+def _selected(selection: Selection) -> Any:
+    """The events `selection` holds, as `domain.artifacts.Selection.holds` defines them."""
+
+    held = events.c.occurred_at >= selection.since
+    if selection.until is not None:
+        held &= events.c.occurred_at < selection.until
+    if selection.event_type is not None:
+        held &= events.c.event_type == selection.event_type.value
+    if selection.source is not None:
+        held &= events.c.source == selection.source.value
+    if selection.client_version is not None:
+        held &= events.c.client_version == selection.client_version
+    if selection.automated is not None:
+        held &= _automated if selection.automated else ~_automated
+    if selection.artifact_id is None:
+        if selection.artifact_type is not None:
+            held &= events.c.artifact_type == selection.artifact_type
+        return held
+    own = events.c.artifact_id == selection.artifact_id
+    if selection.artifact_type is not None:
+        own &= events.c.artifact_type == selection.artifact_type
+    if selection.members:
+        # A prefix compared as text, not LIKE: `_` is a wildcard there and SQLite's LIKE ignores
+        # case.
+        prefix = f"{selection.artifact_id}:"
+        own |= (
+            (events.c.artifact_type == "skill")
+            & (func.substr(events.c.artifact_id, 1, len(prefix)) == prefix)
+            & (func.length(events.c.artifact_id) > len(prefix))
+        )
+    return held & own
 
 
 def _count(kind: EventType) -> Any:

@@ -9,6 +9,14 @@ from typing import Protocol
 
 from returns.io import IOResult
 
+from aart_cli_telemetry_server.domain.artifacts import (
+    ClientVersion,
+    EventView,
+    Holding,
+    Reach,
+    Selection,
+    Tally,
+)
 from aart_cli_telemetry_server.domain.events import StoredEvent
 from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
@@ -38,7 +46,7 @@ class EventRepository(Protocol):
 
     `add` keeps every event in one transaction, and an id already kept is kept once: that is what
     makes a client's retry after a lost answer harmless. The aggregates agree with
-    `domain.stats` on every input.
+    `domain.stats`, and the read model's answers with `domain.artifacts`, on every input.
     """
 
     def add(self, events: Sequence[StoredEvent]) -> IOResult[None, StorageError]: ...
@@ -62,3 +70,17 @@ class EventRepository(Protocol):
     def daily(self, period: Window) -> IOResult[tuple[DailyCount, ...], StorageError]: ...
 
     def by_source(self, period: Window) -> IOResult[tuple[SourceUsage, ...], StorageError]: ...
+
+    def tallies(self, selection: Selection) -> IOResult[tuple[Tally, ...], StorageError]: ...
+
+    def reach(self, selection: Selection) -> IOResult[tuple[Reach, ...], StorageError]: ...
+
+    def holdings(self, selection: Selection) -> IOResult[tuple[Holding, ...], StorageError]: ...
+
+    def recent(
+        self, selection: Selection, limit: int, before: tuple[datetime, str] | None
+    ) -> IOResult[tuple[EventView, ...], StorageError]: ...
+
+    def client_versions(
+        self, selection: Selection
+    ) -> IOResult[tuple[ClientVersion, ...], StorageError]: ...

@@ -6,11 +6,12 @@ For tests, and as the oracle the SQL repository is held to.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from returns.io import IOResult, IOSuccess
 
 from aart_cli_telemetry_server.application.ports import StorageError
-from aart_cli_telemetry_server.domain import stats
+from aart_cli_telemetry_server.domain import artifacts, stats
 from aart_cli_telemetry_server.domain.events import StoredEvent
 
 __all__ = ["InMemoryEventRepository"]
@@ -57,3 +58,28 @@ class InMemoryEventRepository:
         self, period: stats.Window
     ) -> IOResult[tuple[stats.SourceUsage, ...], StorageError]:
         return IOSuccess(stats.by_source(self._events.values(), period))
+
+    def tallies(
+        self, selection: artifacts.Selection
+    ) -> IOResult[tuple[artifacts.Tally, ...], StorageError]:
+        return IOSuccess(artifacts.tallies(self._events.values(), selection))
+
+    def reach(
+        self, selection: artifacts.Selection
+    ) -> IOResult[tuple[artifacts.Reach, ...], StorageError]:
+        return IOSuccess(artifacts.reach(self._events.values(), selection))
+
+    def holdings(
+        self, selection: artifacts.Selection
+    ) -> IOResult[tuple[artifacts.Holding, ...], StorageError]:
+        return IOSuccess(artifacts.holdings(self._events.values(), selection))
+
+    def recent(
+        self, selection: artifacts.Selection, limit: int, before: tuple[datetime, str] | None
+    ) -> IOResult[tuple[artifacts.EventView, ...], StorageError]:
+        return IOSuccess(artifacts.recent(self._events.values(), selection, limit, before))
+
+    def client_versions(
+        self, selection: artifacts.Selection
+    ) -> IOResult[tuple[artifacts.ClientVersion, ...], StorageError]:
+        return IOSuccess(artifacts.client_versions(self._events.values(), selection))

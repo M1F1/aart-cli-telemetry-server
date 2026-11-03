@@ -14,6 +14,7 @@ import sqlite3
 import stat
 import threading
 from collections.abc import Callable, Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TypeVar
 
@@ -38,11 +39,11 @@ from aart_cli_telemetry_server.adapters.sql import (
     sqlite_url,
 )
 from aart_cli_telemetry_server.application.ports import EventRepository, StorageError
-from aart_cli_telemetry_server.domain import stats
-from aart_cli_telemetry_server.domain.events import StoredEvent
+from aart_cli_telemetry_server.domain import artifacts, stats
+from aart_cli_telemetry_server.domain.events import Event, EventType, Source, StoredEvent
 from aart_cli_telemetry_server.effects import perform
 
-from .strategies import NOW, histories, numbered
+from .strategies import CLIENTS, NOW, histories, numbered, selections
 
 POSTGRES = os.environ.get("AART_CLI_TELEMETRY_TEST_POSTGRES_URL", "").strip()
 
@@ -142,6 +143,112 @@ def test_nothing_to_add_and_ping(make: Callable[[], EventRepository]) -> None:
     assert _value(repository.summary(stats.window(1, NOW))) == stats.Summary(
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     )
+
+
+@settings(
+    max_examples=80, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(
+    history=histories,
+    selection=selections(),
+    limit=st.integers(1, artifacts.MAX_EVENTS),
+    cursor=st.none() | st.integers(0, 39),
+)
+def test_every_read_model_answer_agrees_with_the_definitions(
+    make: Callable[[], EventRepository],
+    history: list[StoredEvent],
+    selection: artifacts.Selection,
+    limit: int,
+    cursor: int | None,
+) -> None:
+    repository = make()
+    repository.add(history)
+    oracle = _oracle(history)
+    before = None
+    if cursor is not None and history:
+        chosen = history[cursor % len(history)].event
+        before = (chosen.occurred_at, chosen.event_id)
+    reads: tuple[Callable[[EventRepository], IOResult[object, StorageError]], ...] = (
+        lambda r: r.tallies(selection),
+        lambda r: r.reach(selection),
+        lambda r: r.holdings(selection),
+        lambda r: r.recent(selection, limit, before),
+        lambda r: r.recent(selection, 3, None),
+        lambda r: r.client_versions(selection),
+    )
+    for read in reads:
+        assert _value(read(repository)) == _value(read(oracle))
+
+
+def _at(
+    number: int,
+    kind: EventType,
+    name: str,
+    moment: datetime,
+    *,
+    artifact_type: str = "skill",
+    client: str = CLIENTS[0],
+) -> StoredEvent:
+    source = Source.OPENCODE_PLUGIN if kind is EventType.USED else Source.AART_CLI
+    return StoredEvent(
+        Event(
+            f"00000000-0000-4000-8000-{number:012d}",
+            moment,
+            kind,
+            source,
+            name,
+            artifact_type,
+            "1.0.1",
+        ),
+        client,
+        "0.24.0",
+        NOW,
+    )
+
+
+#: Where a rule's edge is: an install and a removal at one moment, an event at `until`, a name
+#: that only looks like a member, and a member of another kind.
+_EDGES = [
+    _at(1, EventType.INSTALLED, "superpowers", NOW, artifact_type="plugin"),
+    _at(2, EventType.REMOVED, "superpowers", NOW, artifact_type="plugin"),
+    _at(3, EventType.INSTALLED, "superpowers", NOW, artifact_type="plugin", client=CLIENTS[1]),
+    _at(4, EventType.INSTALLED, "superpowers:tdd", NOW),
+    _at(5, EventType.USED, "superpowers:tdd", NOW - timedelta(hours=1)),
+    _at(6, EventType.USED, "superpowers:", NOW - timedelta(hours=1)),
+    _at(7, EventType.USED, "superpowers:grep", NOW, artifact_type="mcp"),
+    _at(8, EventType.USED, "super_powers:tdd", NOW),
+    _at(9, EventType.USED, "superpowersX", NOW),
+]
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        artifacts.Selection(artifacts.EPOCH),
+        artifacts.Selection(artifacts.EPOCH, until=NOW),
+        artifacts.Selection(artifacts.EPOCH, artifact_id="superpowers", members=True),
+        artifacts.Selection(
+            artifacts.EPOCH, artifact_type="plugin", artifact_id="superpowers", members=True
+        ),
+        artifacts.Selection(artifacts.EPOCH, artifact_id="super_powers", members=True),
+    ],
+)
+def test_the_read_model_s_edges_agree_with_the_definitions(
+    make: Callable[[], EventRepository], selection: artifacts.Selection
+) -> None:
+    repository = make()
+    repository.add(_EDGES)
+    oracle = _oracle(_EDGES)
+
+    reads: tuple[Callable[[EventRepository], IOResult[object, StorageError]], ...] = (
+        lambda r: r.tallies(selection),
+        lambda r: r.reach(selection),
+        lambda r: r.holdings(selection),
+        lambda r: r.recent(selection, artifacts.MAX_EVENTS, None),
+        lambda r: r.client_versions(selection),
+    )
+    for read in reads:
+        assert _value(read(repository)) == _value(read(oracle))
 
 
 # -- SQLite on disk --------------------------------------------------------------------------------

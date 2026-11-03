@@ -28,3 +28,10 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line
 .number { text-align: right; font-variant-numeric: tabular-nums; }
 select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
 footer { padding: 0 16px 24px; }
+h3 { font-size: 14px; margin: 14px 0 6px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+input[type="search"] { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; min-width: 200px; }
+tbody#artifacts tr { cursor: pointer; }
+tbody#artifacts tr:hover, tbody#artifacts tr.chosen { background: var(--bg); }
+a { color: var(--accent); }
+code { font-size: 13px; }
