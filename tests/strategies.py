@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, TypeVar
 
 from hypothesis import strategies as st
 
+from aart_cli_telemetry_server.domain.artifacts import EPOCH, Selection
 from aart_cli_telemetry_server.domain.events import (
     SOURCES_FOR,
     Cause,
@@ -19,12 +20,14 @@ from aart_cli_telemetry_server.domain.events import (
     fingerprint,
 )
 
+_V = TypeVar("_V")
+
 #: The moment every generated history ends at; a test's clock reads this.
 NOW = datetime(2026, 10, 29, 18, 0, tzinfo=UTC)
 
 uuids = st.uuids().map(str)
 names = st.from_regex(r"[0-9A-Za-z._@:+-]{1,20}", fullmatch=True)
-kinds = st.sampled_from(("mcp", "skill", "agent", "command"))
+kinds = st.sampled_from(("mcp", "skill", "agent", "command", "plugin"))
 versions = st.none() | st.from_regex(r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}", fullmatch=True)
 moments = st.integers(0, 40 * 24 * 3600 * 1_000_000).map(
     lambda micro: NOW - timedelta(microseconds=micro)
@@ -114,7 +117,20 @@ def events(
         event_type=kind,
         source=draw(st.sampled_from(sorted(SOURCES_FOR[kind]))),
         artifact_id=draw(
-            st.sampled_from(("github", "jira-mcp", "review", "Zeta", "alpha")) | names
+            st.sampled_from(
+                (
+                    "github",
+                    "jira-mcp",
+                    "review",
+                    "Zeta",
+                    "alpha",
+                    "superpowers",
+                    "superpowers:brainstorming",
+                    "superpowers:tdd",
+                    "super_powers:tdd",
+                )
+            )
+            | names
         ),
         artifact_type=draw(kinds),
         artifact_version=None if kind is EventType.UNMANAGED_USED else draw(versions),
@@ -139,6 +155,30 @@ CLIENTS = (
 )
 
 histories = st.lists(stored_events(), max_size=40, unique_by=lambda stored: stored.event_id)
+
+
+@st.composite
+def selections(draw: st.DrawFn) -> Selection:
+    """Any selection, leaning to the names, versions and moments histories hold, each filter
+    seldom set, so most selections hold some of a history."""
+
+    def seldom(values: st.SearchStrategy[_V]) -> _V | None:
+        return draw(values) if draw(st.integers(0, 3)) == 0 else None
+
+    artifact_id = seldom(st.sampled_from(("github", "superpowers", "super_powers", "Zeta")) | names)
+    since = draw(st.just(EPOCH) | moments)
+    until = seldom(moments)
+    return Selection(
+        since=since,
+        until=until if until is None or until > since else since + (since - until),
+        event_type=seldom(st.sampled_from(list(EventType))),
+        source=seldom(st.sampled_from(list(Source))),
+        client_version=seldom(st.sampled_from(("0.22.0", "0.24.0", "9.9.9"))),
+        automated=seldom(st.booleans()),
+        artifact_type=seldom(kinds),
+        artifact_id=artifact_id,
+        members=artifact_id is not None and draw(st.booleans()),
+    )
 
 
 def numbered(
@@ -219,6 +259,7 @@ __all__ = [
     "histories",
     "numbered",
     "request",
+    "selections",
     "stored_events",
     "wire",
 ]

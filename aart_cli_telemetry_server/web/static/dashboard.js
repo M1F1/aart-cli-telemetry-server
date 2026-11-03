@@ -16,6 +16,125 @@ function cell(text, className) {
   return td;
 }
 
+let chosen = null;
+
+function query(params) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== "" && value !== null && value !== undefined) search.set(key, value);
+  }
+  return search.toString();
+}
+
+async function read(path, params) {
+  const response = await fetch(`/api/v1/${path}?${query(params)}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`${path}: ${response.status}`);
+  return response.json();
+}
+
+function row(cells) {
+  const tr = document.createElement("tr");
+  tr.append(...cells);
+  return tr;
+}
+
+async function artifacts(days) {
+  const found = await read("artifacts", {
+    days,
+    sort: document.getElementById("order").value,
+    q: document.getElementById("search").value.trim(),
+    artifact_type: document.getElementById("kind").value,
+    limit: 200,
+  });
+  document.getElementById("artifacts").replaceChildren(
+    ...found.artifacts.map((item) => {
+      const tr = row([
+        cell(item.artifact_id),
+        cell(item.artifact_type),
+        cell(item.latest_version ?? ""),
+        cell(item.installs, "number"),
+        cell(item.updates, "number"),
+        cell(item.removals, "number"),
+        cell(item.holders, "number"),
+        cell(item.uses, "number"),
+        cell(item.member_uses || "", "number"),
+        cell(item.used_by, "number"),
+        cell(item.last_seen ?? ""),
+      ]);
+      if (chosen && chosen.type === item.artifact_type && chosen.id === item.artifact_id) tr.className = "chosen";
+      tr.addEventListener("click", () => {
+        chosen = { type: item.artifact_type, id: item.artifact_id };
+        run();
+      });
+      return tr;
+    })
+  );
+}
+
+async function detail(days) {
+  const panel = document.getElementById("detail");
+  if (!chosen) {
+    panel.hidden = true;
+    return;
+  }
+  const path = `artifacts/${encodeURIComponent(chosen.type)}/${encodeURIComponent(chosen.id)}`;
+  const response = await fetch(`/api/v1/${path}?${query({ days })}`, { cache: "no-store" });
+  if (response.status === 404) {
+    panel.hidden = true;
+    return;
+  }
+  if (!response.ok) throw new Error(`${path}: ${response.status}`);
+  const found = await response.json();
+  const events = await read("events", { days, artifact_id: chosen.id, members: true, limit: 50 });
+  panel.hidden = false;
+  document.getElementById("detail-title").textContent = `${found.artifact_type} ${found.artifact_id}`;
+  document.getElementById("detail-meta").textContent = [
+    found.plugin ? `a skill of the plugin ${found.plugin}` : null,
+    `latest version ${found.latest_version ?? "unknown"}`,
+    `${found.holders} installations hold it now`,
+    `${found.installed_by} installed it, ${found.used_by} used it`,
+    found.sources.map((item) => `${item.source}: ${item.events}`).join(", "),
+  ].filter(Boolean).join(" · ");
+  document.getElementById("detail-versions").replaceChildren(
+    ...found.versions.map((item) =>
+      row([
+        cell(item.artifact_version ?? "unknown"),
+        cell(item.installs, "number"),
+        cell(item.updates, "number"),
+        cell(item.removals, "number"),
+        cell(item.uses, "number"),
+        cell(item.last_seen),
+      ])
+    )
+  );
+  document.getElementById("detail-members-block").hidden = found.members.length === 0;
+  document.getElementById("detail-members").replaceChildren(
+    ...found.members.map((item) =>
+      row([
+        cell(item.artifact_id),
+        cell(item.installs, "number"),
+        cell(item.holders, "number"),
+        cell(item.uses, "number"),
+        cell(item.used_by, "number"),
+        cell(item.last_seen ?? ""),
+      ])
+    )
+  );
+  document.getElementById("detail-events").replaceChildren(
+    ...events.events.map((item) =>
+      row([
+        cell(item.occurred_at),
+        cell(item.event_type),
+        cell(item.artifact_id),
+        cell(item.artifact_version ?? ""),
+        cell(item.source),
+        cell(item.client_id.slice(0, 8)),
+        cell(item.client_version),
+      ])
+    )
+  );
+}
+
 function tiles(summary) {
   const items = [
     ["Uses", summary.uses],
@@ -63,10 +182,9 @@ function draw(id, type, labels, datasets, options = {}) {
 
 async function refresh() {
   const days = document.getElementById("days").value;
-  const [summary, daily, top, unmanaged, sources, failures] = await Promise.all([
+  const [summary, daily, unmanaged, sources, failures] = await Promise.all([
     stats("summary", days),
     stats("daily", days),
-    stats("top-artifacts", days),
     stats("top-unmanaged", days),
     stats("by-source", days),
     stats("failures", days),
@@ -89,21 +207,6 @@ async function refresh() {
     sources.by_source.map((row) => `${row.source} · ${row.artifact_type}`),
     [{ label: "Uses", data: sources.by_source.map((row) => row.uses), backgroundColor: color("--accent") }],
     { indexAxis: "y", scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } }
-  );
-  const body = document.getElementById("top");
-  body.replaceChildren(
-    ...top.artifacts.map((row) => {
-      const tr = document.createElement("tr");
-      tr.append(
-        cell(row.artifact_id),
-        cell(row.artifact_type),
-        cell(row.uses, "number"),
-        cell(row.clients, "number"),
-        cell(row.installs, "number"),
-        cell(row.last_used)
-      );
-      return tr;
-    })
   );
   document.getElementById("unmanaged").replaceChildren(
     ...unmanaged.tools.map((row) => {
@@ -143,6 +246,8 @@ async function refresh() {
       return tr;
     })
   );
+  await artifacts(days);
+  await detail(days);
   document.getElementById("updated").textContent = `updated ${new Date().toISOString().slice(0, 19)}Z`;
 }
 
@@ -153,5 +258,12 @@ function run() {
 }
 
 document.getElementById("days").addEventListener("change", run);
+document.getElementById("kind").addEventListener("change", run);
+document.getElementById("order").addEventListener("change", run);
+let typing = null;
+document.getElementById("search").addEventListener("input", () => {
+  clearTimeout(typing);
+  typing = setTimeout(run, 250);
+});
 run();
 setInterval(run, 60000);

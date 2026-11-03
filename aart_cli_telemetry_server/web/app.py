@@ -1,4 +1,5 @@
-"""The HTTP application: the ingest endpoint, health, the dashboard and its aggregates.
+"""The HTTP application: the ingest endpoint, health, the dashboard, its aggregates, the read API
+(`read`), its description at `/docs`, and the same reads for an agent over MCP at `/mcp` (`mcp`).
 
 Imperative shell. Each route reads the request, calls one use case with the repository and clock
 it was built with, and maps the `returns` container to a status and a body. No route decides what
@@ -25,9 +26,12 @@ from aart_cli_telemetry_server.domain.contract import (
     RefusalKind,
     too_large,
 )
-from aart_cli_telemetry_server.domain.events import stamp
 from aart_cli_telemetry_server.domain.stats import MAX_DAYS, MAX_TOP
 from aart_cli_telemetry_server.effects import perform
+
+from . import documents
+from .mcp import mcp_router
+from .read import read_router
 
 __all__ = ["create_app"]
 
@@ -98,11 +102,15 @@ async def _body(request: Request) -> bytes | None:
 
 def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
     app = FastAPI(
-        title="aart-cli-telemetry-server", docs_url=None, redoc_url=None, openapi_url=None
+        title="aart-cli-telemetry-server",
+        summary="aart-cli's artifact telemetry: what is installed, updated, removed and used.",
+        docs_url="/docs",
+        redoc_url=None,
+        openapi_url="/openapi.json",
     )
     days_query = Query(default=30, ge=1, le=MAX_DAYS)
 
-    @app.post("/api/v1/events/batch")
+    @app.post("/api/v1/events/batch", tags=["contract"])
     async def ingest(request: Request) -> Response:
         raw = await _body(request)
         if raw is None:
@@ -112,148 +120,67 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
             lambda acknowledgement: {"acknowledged_event_ids": list(acknowledgement.event_ids)},
         )
 
-    @app.get("/api/v1/contract")
+    @app.get("/api/v1/contract", tags=["contract"])
     def contract() -> Response:
         # A client asks before it sends, so this answers without the database.
         return JSONResponse({"schema_version": 1, "revision": CONTRACT_REVISION})
 
-    @app.get("/healthz")
+    @app.get("/healthz", tags=["health"])
     def healthz() -> Response:
         if isinstance(repository.ping(), IOSuccess):
             return JSONResponse({"status": "ok"})
         return JSONResponse({"status": "unavailable"}, status_code=503)
 
-    @app.get("/api/v1/stats/summary")
+    @app.get("/api/v1/stats/summary", tags=["dashboard"])
     def summary(days: int = days_query) -> Response:
         return _answer(
             use_cases.summary(days, repository, clock),
-            lambda found: {
-                "days": days,
-                "uses": found.uses,
-                "installs": found.installs,
-                "updates": found.updates,
-                "removals": found.removals,
-                "active_clients": found.active_clients,
-                "using_clients": found.using_clients,
-                "used_artifacts": found.used_artifacts,
-                "unmanaged_uses": found.unmanaged_uses,
-                "failures": found.failures,
-                "automated_clients": found.automated_clients,
-            },
+            lambda found: documents.summary_document(days, found),
         )
 
-    @app.get("/api/v1/stats/top-artifacts")
+    @app.get("/api/v1/stats/top-artifacts", tags=["dashboard"])
     def top_artifacts(
         days: int = days_query, limit: int = Query(default=20, ge=1, le=MAX_TOP)
     ) -> Response:
         return _answer(
             use_cases.top_artifacts(days, limit, repository, clock),
-            lambda found: {
-                "days": days,
-                "artifacts": [
-                    {
-                        "artifact_type": item.artifact_type,
-                        "artifact_id": item.artifact_id,
-                        "uses": item.uses,
-                        "clients": item.clients,
-                        "installs": item.installs,
-                        "last_used": stamp(item.last_used),
-                    }
-                    for item in found
-                ],
-            },
+            lambda found: documents.top_artifacts_document(days, found),
         )
 
-    @app.get("/api/v1/stats/top-unmanaged")
+    @app.get("/api/v1/stats/top-unmanaged", tags=["dashboard"])
     def top_unmanaged(
         days: int = days_query, limit: int = Query(default=20, ge=1, le=MAX_TOP)
     ) -> Response:
         return _answer(
             use_cases.top_unmanaged(days, limit, repository, clock),
-            lambda found: {
-                "days": days,
-                "tools": [
-                    {
-                        "artifact_type": item.artifact_type,
-                        "artifact_id": item.artifact_id,
-                        "uses": item.uses,
-                        "clients": item.clients,
-                        "last_used": stamp(item.last_used),
-                    }
-                    for item in found
-                ],
-            },
+            lambda found: documents.top_unmanaged_document(days, found),
         )
 
-    @app.get("/api/v1/stats/failures")
+    @app.get("/api/v1/stats/failures", tags=["dashboard"])
     def top_failures(
         days: int = days_query, limit: int = Query(default=20, ge=1, le=MAX_TOP)
     ) -> Response:
         return _answer(
             use_cases.top_failures(days, limit, repository, clock),
-            lambda found: {
-                "days": days,
-                "failures": [
-                    {
-                        "fingerprint": item.fingerprint,
-                        "kind": item.kind,
-                        "place": item.place,
-                        "exception": item.exception,
-                        "frames": list(item.frames),
-                        "causes": [
-                            {"exception": cause.exception, "frames": list(cause.frames)}
-                            for cause in item.causes
-                        ],
-                        "diagnostics": list(item.diagnostics),
-                        "occurrences": item.occurrences,
-                        "clients": item.clients,
-                        "versions": list(item.versions),
-                        "platforms": list(item.platforms),
-                        "first_seen": stamp(item.first_seen),
-                        "last_seen": stamp(item.last_seen),
-                    }
-                    for item in found
-                ],
-            },
+            lambda found: documents.failures_document(days, found),
         )
 
-    @app.get("/api/v1/stats/daily")
+    @app.get("/api/v1/stats/daily", tags=["dashboard"])
     def daily(days: int = days_query) -> Response:
         return _answer(
             use_cases.daily_counts(days, repository, clock),
-            lambda found: {
-                "days": days,
-                "daily": [
-                    {
-                        "day": item.day.isoformat(),
-                        "uses": item.uses,
-                        "installs": item.installs,
-                        "updates": item.updates,
-                        "removals": item.removals,
-                        "active_clients": item.active_clients,
-                        "automated_clients": item.automated_clients,
-                    }
-                    for item in found
-                ],
-            },
+            lambda found: documents.daily_document(days, found),
         )
 
-    @app.get("/api/v1/stats/by-source")
+    @app.get("/api/v1/stats/by-source", tags=["dashboard"])
     def by_source(days: int = days_query) -> Response:
         return _answer(
             use_cases.artifacts_by_source(days, repository, clock),
-            lambda found: {
-                "days": days,
-                "by_source": [
-                    {
-                        "source": item.source.value,
-                        "artifact_type": item.artifact_type,
-                        "uses": item.uses,
-                    }
-                    for item in found
-                ],
-            },
+            lambda found: documents.by_source_document(days, found),
         )
+
+    app.include_router(read_router(repository, clock, _answer))
+    app.include_router(mcp_router(repository, clock))
 
     @app.get("/", include_in_schema=False)
     def root() -> Response:

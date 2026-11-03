@@ -32,17 +32,18 @@ A functional core with an imperative shell:
 
 | Layer | What it is | May import |
 |---|---|---|
-| `domain` | The contract (pydantic, strict), events, and the dashboard's counts as pure functions. | pydantic, returns, pure stdlib |
+| `domain` | The contract (pydantic, strict), events, and the dashboard's and read API's counts as pure functions. | pydantic, returns, pure stdlib |
 | `application` | Use cases against ports: `EventRepository` and a clock. Failures are `returns` values. | `domain`, returns |
 | `adapters` | `SqlEventRepository` on SQLAlchemy Core (SQLite, PostgreSQL); `InMemoryEventRepository`. | anything |
-| `web` | FastAPI routes: read the request, call one use case, map the result to a status. | `application`, `domain` |
+| `web` | FastAPI routes and the MCP server: read the request, call one use case, map the result to a status. | `application`, `domain`, `effects` |
 | `effects` | The one place a result leaves IO (`returns.unsafe`). | returns |
 | `cli`, `asgi` | Composition roots: which database, which clock, which address. | everything |
 
 `tach.toml` holds the edges between layers, `tests/test_architecture.py` the third-party imports.
 Every repository is held to the pure definitions in `domain/stats.py` by property tests over
 generated histories (`tests/test_repository_contract.py`), so a database that counts differently
-fails there rather than on the dashboard.
+fails there rather than on the dashboard. Set `AART_CLI_TELEMETRY_TEST_POSTGRES_URL` to a
+PostgreSQL 16 database to run them against PostgreSQL too.
 
 ## Run it locally
 
@@ -94,8 +95,9 @@ of it decides who reaches it. Any other value of that variable refuses to start.
 
 aart-cli sends no credential and cannot answer a sign-in, so what limits who may send events is
 where a request can come from: the organisation's network, a VPN, a private endpoint, a zero-trust
-access service -- whichever the organisation uses. The dashboard and `/api/v1/stats/*` may also sit
-behind the organisation's sign-in, with `/api/v1/events/batch` and `/healthz` left out of it.
+access service -- whichever the organisation uses. The dashboard, `/docs`, `/mcp` and every
+`GET /api/v1/...` but `/api/v1/contract` may also sit behind the organisation's sign-in, with
+`/api/v1/events/batch`, `/api/v1/contract` and `/healthz` left out of it.
 Never expose the server to the Internet unrestricted.
 
 ## Backup
@@ -109,17 +111,41 @@ takes a consistent copy with SQLite's online backup while the server runs. For P
 
 ## Endpoints
 
+`GET /docs` describes every endpoint with Swagger UI, and `GET /openapi.json` is that description.
+Swagger UI's script and style come from a CDN; a network that blocks it still has `/openapi.json`.
+
 | Endpoint | |
 |---|---|
 | `POST /api/v1/events/batch` | The contract's ingest endpoint. |
+| `GET /api/v1/contract` | The contract's revision this server holds. |
 | `GET /healthz` | `{"status": "ok"}` when the database can be read. |
 | `GET /dashboard` | The dashboard. |
+| `GET /api/v1/artifacts` | Every artifact installed, updated, removed or used: counts, how many installations hold it now, its latest version, and a plugin's skills' uses. `sort=installs\|uses\|holders\|recent\|name`, `q`, `artifact_type`, `limit`. |
+| `GET /api/v1/artifacts/{artifact_type}/{artifact_id}` | One artifact: its counts, versions, days, sources, and a plugin's skills. `404` when nothing selected is about it. |
+| `GET /api/v1/events` | The events kept, newest first, a page at a time: `event_type`, `artifact_type`, `artifact_id`, `members=true` for a plugin's skills too, `limit`, `before=<next_before>`. |
+| `GET /api/v1/client-versions` | The aart-cli versions events were sent from, and by how many installations. |
 | `GET /api/v1/stats/summary?days=30` | Uses, installs, updates, removals, people's and automated active installations, uses of tools aart-cli did not install, failures aart-cli met. |
 | `GET /api/v1/stats/top-artifacts?days=30&limit=20` | Artifacts by uses. |
 | `GET /api/v1/stats/top-unmanaged?days=30&limit=20` | Skills and MCPs aart-cli did not install, by uses (`unmanaged.used`). |
 | `GET /api/v1/stats/failures?days=30&limit=20` | Failures aart-cli met, by defect (`aart_cli.failed`): most frequent, then most recent, first. |
 | `GET /api/v1/stats/daily?days=30` | Per UTC day. |
 | `GET /api/v1/stats/by-source?days=30` | Uses per harness and kind. |
+| `POST /mcp` | The same reads for an agent, as a read-only MCP server (below). |
+
+Every `/api/v1/artifacts`, `/api/v1/events` and `/api/v1/client-versions` query takes the same
+selection: `days` (30) or `since`, `until`, `source`, `client_version` and `automated`. A plugin's
+skill is the artifact `skill` named `<plugin>:<skill>`; installing the plugin installs each of them.
+
+### MCP
+
+`/mcp` is an MCP server over Streamable HTTP that only reads: `summary`, `list_artifacts`,
+`get_artifact`, `list_events`, `client_versions`, `failures`, `unmanaged_tools` and `daily`, each
+answering what the matching endpoint does. A request from a browser page on another host is
+refused. To ask Claude Code about the server:
+
+```bash
+claude mcp add --transport http aart-telemetry http://127.0.0.1:8765/mcp
+```
 
 ## Development
 

@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 
 from returns.io import IOResult
 from returns.pipeline import flow
 from returns.pointfree import bind
 
+from aart_cli_telemetry_server.domain.artifacts import (
+    EPOCH,
+    ArtifactDetail,
+    ArtifactRow,
+    ClientVersion,
+    EventView,
+    Order,
+    Selection,
+    artifact_detail,
+    artifact_rows,
+    ranked,
+)
 from aart_cli_telemetry_server.domain.contract import Refusal, read_batch
 from aart_cli_telemetry_server.domain.events import Batch, acknowledged, stored_events
 from aart_cli_telemetry_server.domain.stats import (
@@ -25,8 +38,12 @@ from .ports import Clock, EventRepository, StorageError
 __all__ = [
     "Acknowledgement",
     "IngestFailure",
+    "artifact",
+    "artifacts",
     "artifacts_by_source",
+    "client_versions",
     "daily_counts",
+    "events",
     "ingest",
     "summary",
     "top_artifacts",
@@ -91,3 +108,53 @@ def artifacts_by_source(
     days: int, repository: EventRepository, clock: Clock
 ) -> IOResult[tuple[SourceUsage, ...], StorageError]:
     return repository.by_source(window(days, clock()))
+
+
+def _holding(selection: Selection) -> Selection:
+    """Who holds an artifact is read from every install, update and removal up to `until`."""
+
+    return replace(selection, since=EPOCH, event_type=None)
+
+
+def artifacts(
+    selection: Selection, order: Order, limit: int, search: str | None, repository: EventRepository
+) -> IOResult[tuple[ArtifactRow, ...], StorageError]:
+    """Every artifact the selected events are about, ordered, at most `limit`."""
+
+    return repository.tallies(selection).bind(
+        lambda counted: repository.reach(selection).bind(
+            lambda reached: repository.holdings(_holding(selection)).map(
+                lambda held: ranked(artifact_rows(counted, reached, held), order, limit, search)
+            )
+        )
+    )
+
+
+def artifact(
+    selection: Selection, artifact_type: str, artifact_id: str, repository: EventRepository
+) -> IOResult[ArtifactDetail | None, StorageError]:
+    """One artifact and its members, from the events `selection` holds about them."""
+
+    about = replace(selection, artifact_type=artifact_type, artifact_id=artifact_id, members=True)
+    return repository.tallies(about).bind(
+        lambda counted: repository.reach(about).bind(
+            lambda reached: repository.holdings(_holding(about)).map(
+                lambda held: artifact_detail(counted, reached, held, artifact_type, artifact_id)
+            )
+        )
+    )
+
+
+def events(
+    selection: Selection,
+    limit: int,
+    before: tuple[datetime, str] | None,
+    repository: EventRepository,
+) -> IOResult[tuple[EventView, ...], StorageError]:
+    return repository.recent(selection, limit, before)
+
+
+def client_versions(
+    selection: Selection, repository: EventRepository
+) -> IOResult[tuple[ClientVersion, ...], StorageError]:
+    return repository.client_versions(selection)
