@@ -236,3 +236,9 @@ def test_a_database_that_is_down_is_503_and_never_an_acknowledgement() -> None:
     assert (stored.status_code, stored.json()) == (503, {"error": "the database is unavailable"})
     assert client.get("/healthz").status_code == 503
     assert client.get("/api/v1/stats/summary").status_code == 503
+
+
+def test_the_contract_endpoint_says_the_revision_and_needs_no_database() -> None:
+    for repository in (InMemoryEventRepository(), _Broken()):
+        answer = TestClient(create_app(repository, clock=lambda: NOW)).get("/api/v1/contract")
+        assert (answer.status_code, answer.json()) == (200, {"schema_version": 1, "revision": 6})

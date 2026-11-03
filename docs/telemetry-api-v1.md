@@ -117,6 +117,36 @@ The server stores a batch in one transaction and answers `200` only after it com
 
 An error body never repeats a submitted value beyond the `event_id` and `index` of a rejected event.
 
+## The revision a server holds
+
+    GET <server>/api/v1/contract
+
+Version 1 has grown by additions, each a revision. A server says which it holds:
+
+```json
+{"schema_version": 1, "revision": 6}
+```
+
+| Revision | Added |
+|---|---|
+| 1 | The request, the events `artifact.installed`, `artifact.updated`, `artifact.removed` and `artifact.used`, and the responses. |
+| 2 | `unmanaged.used`. |
+| 3 | `aart_cli.failed` and its `failure`. |
+| 4 | The request's `automated`. |
+| 5 | A failure's `causes`. |
+| 6 | This endpoint. |
+
+The answer is `200` with that object. The client reads `schema_version` and `revision`, and ignores
+any other field. The server needs no database to answer it.
+
+The client asks before it sends, at most once per synchronisation. With a revision, it sends only
+what that revision holds. An event of a type the revision does not hold, a failure with `causes`
+below revision 5, and every event of a request that would carry `automated` below revision 4 wait
+unsent until the server holds them. They are not marked rejected. `401`, `403`, `429`, `5xx`, a
+timeout or no connection are handled as they are for the batch. Any other answer -- a `404` from a
+server older than revision 6, or a `200` that names no revision -- means the client sends
+everything, as it did before, and handles a `422` as above.
+
 ## Other endpoints of the server
 
 These are the server's own and not part of what aart-cli relies on.
@@ -130,13 +160,17 @@ These are the server's own and not part of what aart-cli relies on.
 ## Versioning
 
 A change that a version-1 server or client would misread is version 2: a new path
-(`/api/v2/...`) and a new `schema_version`. A new event type is added to version 1: a server that
-does not know it answers `422` naming those events, which the client marks rejected while the
-rest of the batch is stored, so nothing is misread and only the new type is lost. `unmanaged.used`
-was added this way, and `aart_cli.failed` with the `failure` field only it carries. An optional
-field of the request is added to version 1 when a client sends it only where it matters: a server
-that does not know it refuses just those requests, and the client marks their events rejected. `automated` was
-added this way: an older server loses only what automation sends, and a person's requests are
-unchanged. An optional field of a `failure` is added the same way, sent only where it holds
-something: `causes` was, and an older server refuses only the failures that have causes (`422`),
-while every other event of the request is stored.
+(`/api/v2/...`) and a new `schema_version`. An addition to version 1 is the next revision, in the
+table above, and a server that holds it says so. From revision 6 on, a client holds back what the
+server does not yet hold, so a client may be released before the server it sends to.
+
+What follows is how an addition behaves with a server older than revision 6. A new event type is
+added to version 1: a server that does not know it answers `422` naming those events, which the
+client marks rejected while the rest of the batch is stored, so nothing is misread and only the new
+type is lost. `unmanaged.used` was added this way, and `aart_cli.failed` with the `failure` field
+only it carries. An optional field of the request is added to version 1 when a client sends it only
+where it matters: a server that does not know it refuses just those requests, and the client marks
+their events rejected. `automated` was added this way: an older server loses only what automation
+sends, and a person's requests are unchanged. An optional field of a `failure` is added the same
+way, sent only where it holds something: `causes` was, and an older server refuses only the
+failures that have causes (`422`), while every other event of the request is stored.
