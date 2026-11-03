@@ -139,12 +139,13 @@ Version 1 has grown by additions, each a revision. A server says which it holds:
 The answer is `200` with that object. The client reads `schema_version` and `revision`, and ignores
 any other field. The server needs no database to answer it.
 
-The client asks before it sends, at most once per synchronisation. With an answer, it sends only
+The client asks before it sends, at most once per synchronisation. With a revision, it sends only
 what that revision holds. An event of a type the revision does not hold, a failure with `causes`
 below revision 5, and every event of a request that would carry `automated` below revision 4 wait
-unsent until the server holds them. They are not marked rejected. A `404` is a server from before
-revision 6: the client sends everything, as it did before, and a `422` is handled as above. Any
-other answer, a timeout or no connection is handled as it is for the batch.
+unsent until the server holds them. They are not marked rejected. `401`, `403`, `429`, `5xx`, a
+timeout or no connection are handled as they are for the batch. Any other answer -- a `404` from a
+server older than revision 6, or a `200` that names no revision -- means the client sends
+everything, as it did before, and handles a `422` as above.
 
 ## Other endpoints of the server
 
