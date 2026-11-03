@@ -194,6 +194,10 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
                         "place": item.place,
                         "exception": item.exception,
                         "frames": list(item.frames),
+                        "causes": [
+                            {"exception": cause.exception, "frames": list(cause.frames)}
+                            for cause in item.causes
+                        ],
                         "diagnostics": list(item.diagnostics),
                         "occurrences": item.occurrences,
                         "clients": item.clients,

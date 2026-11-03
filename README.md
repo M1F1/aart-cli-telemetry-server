@@ -7,7 +7,9 @@ aart-cli did not install (`unmanaged.used`) are counted apart, by the name the h
 Failures aart-cli met (`aart_cli.failed`: a crash, a command that ended in an error, an
 interruption) are grouped by fingerprint -- the defect, not its line numbers -- with how often, on
 how many installations, on which versions and platforms. A failure carries an exception's type
-name, aart-cli's own frames and diagnostic codes; never a message, an argument or a path. The
+name, aart-cli's own frames and diagnostic codes, and the type and frames of each exception it was
+raised from (`causes`, which the dashboard shows in the place's tooltip); never a message, an
+argument or a path. The
 server recomputes each fingerprint and refuses one that is not the failure's own. An installation
 that runs as automation, such as a CI job, says so (`automated`), and the dashboard counts people's
 installations and automated ones apart, so fresh CI jobs do not read as new people.
@@ -57,9 +59,9 @@ else `$XDG_DATA_HOME/aart-cli-telemetry-server`, else `~/.local/share/aart-cli-t
 `postgresql+psycopg://telemetry@db/telemetry` (install the `postgresql` extra for the driver); a
 URL can carry a password, so it is never printed. `--data-dir` overrides both with SQLite there.
 The schema is created in an empty database on first start; a database at another schema version,
-or not created by this server, is refused and left as it is. A version-1 database from before
-failures were received gains its `failure` table on the first start of this version, and nothing
-else in it changes. Servers starting together on one database do this one at a time, so every
+or not created by this server, is refused and left as it is. A version-1 database from before a
+table version 1 gained later -- `failure`, `automation`, `failure_cause` -- gains it on the first
+start of a version that has it, and nothing else in it changes. Servers starting together on one database do this one at a time, so every
 replica of a first deployment or an upgrade starts. A connection the database dropped -- a
 restart, a failover, an idle timeout -- is replaced before it is used, so the first request after
 one is answered rather than refused with 503.

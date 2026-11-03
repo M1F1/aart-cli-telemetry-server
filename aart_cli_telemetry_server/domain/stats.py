@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from .events import EventType, Failure, Source, StoredEvent
+from .events import Cause, EventType, Failure, Source, StoredEvent
 
 __all__ = [
     "MAX_DAYS",
@@ -114,6 +114,7 @@ class FailureUsage:
     platforms: tuple[str, ...]
     first_seen: datetime
     last_seen: datetime
+    causes: tuple[Cause, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,7 +226,8 @@ def top_failures(
     events: Iterable[StoredEvent], period: Window, limit: int
 ) -> tuple[FailureUsage, ...]:
     """Defects by occurrences, then the latest first, then fingerprint. What a defect is -- its
-    frames with their lines -- is what its latest occurrence (then the greatest id) says."""
+    frames and its causes' frames with their lines -- is what its latest occurrence (then the
+    greatest id) says."""
 
     if not 1 <= limit <= MAX_TOP:
         raise ValueError(f"a list is 1 to {MAX_TOP} failures long")
@@ -255,6 +257,7 @@ def top_failures(
             platforms=tuple(sorted({failure.platform for _, failure in seen[name]})),
             first_seen=min(stored.event.occurred_at for stored, _ in seen[name]),
             last_seen=latest[name][0].event.occurred_at,
+            causes=latest[name][1].causes,
         )
         for name in ranked[:limit]
     )

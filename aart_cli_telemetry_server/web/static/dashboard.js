@@ -121,9 +121,15 @@ async function refresh() {
   document.getElementById("failures").replaceChildren(
     ...failures.failures.map((row) => {
       const tr = document.createElement("tr");
-      const what = [row.exception, ...row.diagnostics].filter(Boolean).join(", ");
+      const raised = row.causes.map((cause) => `from ${cause.exception}`);
+      const what = [[row.exception, ...raised].filter(Boolean).join(" "), ...row.diagnostics]
+        .filter(Boolean)
+        .join(", ");
       const where = cell(row.place);
-      where.title = row.frames.join("\n");
+      where.title = [
+        ...row.frames,
+        ...row.causes.flatMap((cause) => [`raised from ${cause.exception}:`, ...cause.frames]),
+      ].join("\n");
       tr.append(
         where,
         cell(row.kind),

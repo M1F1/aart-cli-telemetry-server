@@ -7,9 +7,10 @@ What only SQLite has -- the file's mode, WAL and the online backup -- is set apa
 only when the URL is SQLite's.
 
 A database this server did not create, or created at another schema version, is refused and left
-exactly as it is. A table schema version 1 gained later -- `failure`, for `aart_cli.failed`, and
-`automation`, for events sent as automation -- is created in a version-1 database that does not
-have it yet, and nothing else in it changes. Servers
+exactly as it is. A table schema version 1 gained later -- `failure`, for `aart_cli.failed`,
+`automation`, for events sent as automation, and `failure_cause`, for what a failure's exception
+was raised from -- is created in a version-1 database that does not have it yet, and nothing else
+in it changes. Servers
 starting together on one database check and create the schema one at a time, and a connection the
 database dropped -- a restart, a failover, an idle timeout -- is replaced before it is used.
 """
@@ -56,6 +57,7 @@ from sqlalchemy.types import TypeDecorator
 
 from aart_cli_telemetry_server.application.ports import StorageError
 from aart_cli_telemetry_server.domain.events import (
+    Cause,
     Event,
     EventType,
     Failure,
@@ -77,6 +79,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "SqlEventRepository",
     "automation",
+    "failure_causes",
     "failures",
     "open_repository",
     "sqlite_url",
@@ -146,6 +149,15 @@ failures = Table(
     Column("python", String(32), nullable=False),
     Column("platform", String(8), nullable=False),
     Index("failure_fingerprint", "fingerprint"),
+)
+
+#: What a failure's exception was raised from, or while handling, in order: a JSON list of
+#: `{"exception", "frames"}`. A failure without causes has no row.
+failure_causes = Table(
+    "failure_cause",
+    metadata,
+    Column("event_id", String(36), ForeignKey("event.event_id"), primary_key=True),
+    Column("causes", Text(), nullable=False),
 )
 
 #: The events a request sent as automation, such as a CI job; every other event is a person's.
@@ -234,6 +246,9 @@ class SqlEventRepository:
     def add(self, stored: Sequence[StoredEvent]) -> IOResult[None, StorageError]:
         rows = [_row(item) for item in stored]
         failed = [_failure_row(item) for item in stored if item.event.failure is not None]
+        caused = [
+            _causes_row(item) for item in stored if item.event.failure and item.event.failure.causes
+        ]
         automated = {item.event_id for item in stored if item.automated}
         dialect = self._engine.dialect.name
         insert = postgresql.insert if dialect == "postgresql" else sqlite.insert
@@ -260,6 +275,11 @@ class SqlEventRepository:
                     connection.execute(
                         insert(failures).on_conflict_do_nothing(index_elements=["event_id"]),
                         failed,
+                    )
+                if caused:
+                    connection.execute(
+                        insert(failure_causes).on_conflict_do_nothing(index_elements=["event_id"]),
+                        caused,
                     )
                 if marked:
                     connection.execute(automation.insert(), marked)
@@ -423,8 +443,13 @@ class SqlEventRepository:
                         failures.c.frames,
                         failures.c.diagnostics,
                         failures.c.platform,
+                        failure_causes.c.causes,
                     )
-                    .select_from(joined)
+                    .select_from(
+                        joined.outerjoin(
+                            failure_causes, failure_causes.c.event_id == failures.c.event_id
+                        )
+                    )
                     .where(held & failures.c.fingerprint.in_(names))
                 ).all()
             return tuple(
@@ -547,6 +572,28 @@ def _failure_row(stored: StoredEvent) -> dict[str, object]:
     }
 
 
+def _causes_row(stored: StoredEvent) -> dict[str, object]:
+    failure: Failure | None = stored.event.failure
+    if failure is None or not failure.causes:
+        raise ValueError("only a failure with causes has a cause row")
+    return {
+        "event_id": stored.event_id,
+        "causes": json.dumps(
+            [
+                {"exception": cause.exception, "frames": list(cause.frames)}
+                for cause in failure.causes
+            ]
+        ),
+    }
+
+
+def _causes(stored: str | None) -> tuple[Cause, ...]:
+    return tuple(
+        Cause(str(cause["exception"]), tuple(cause["frames"]))
+        for cause in json.loads(stored or "[]")
+    )
+
+
 def _failure_usage(name: str, rows: list[Any]) -> FailureUsage:
     """One defect from the rows of its occurrences, as `domain.stats.top_failures` defines it."""
 
@@ -564,6 +611,7 @@ def _failure_usage(name: str, rows: list[Any]) -> FailureUsage:
         platforms=tuple(sorted({row[10] for row in rows})),
         first_seen=min(_aware(row[2]) for row in rows),
         last_seen=_aware(latest[2]),
+        causes=_causes(latest[11]),
     )
 
 
@@ -589,7 +637,7 @@ def _prepare(engine: Engine) -> None:
             raise _Refused(
                 f"this database has schema version {version}; this server reads {SCHEMA_VERSION}"
             )
-        for later in (failures, automation):
+        for later in (failures, automation, failure_causes):
             if later.name not in tables:
                 later.create(connection)
 
