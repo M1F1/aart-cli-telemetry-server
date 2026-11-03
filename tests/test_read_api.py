@@ -149,6 +149,12 @@ def test_a_list_is_narrowed_by_name_kind_order_and_who_sent(client: TestClient) 
     assert [(row["installs"], row["removals"], row["holders"]) for row in one_day] == [(0, 1, 2)]
 
 
+def test_a_list_of_plugins_still_adds_up_their_skills_uses(client: TestClient) -> None:
+    (plugin,) = client.get("/api/v1/artifacts?artifact_type=plugin").json()["artifacts"]
+
+    assert (plugin["artifact_id"], plugin["member_uses"]) == ("superpowers", 3)
+
+
 def test_a_plugin_s_detail_holds_its_versions_days_sources_and_skills(client: TestClient) -> None:
     found = client.get("/api/v1/artifacts/plugin/superpowers").json()
 

@@ -119,12 +119,26 @@ def _holding(selection: Selection) -> Selection:
 def artifacts(
     selection: Selection, order: Order, limit: int, search: str | None, repository: EventRepository
 ) -> IOResult[tuple[ArtifactRow, ...], StorageError]:
-    """Every artifact the selected events are about, ordered, at most `limit`."""
+    """Every artifact the selected events are about, ordered, at most `limit`.
 
-    return repository.tallies(selection).bind(
-        lambda counted: repository.reach(selection).bind(
-            lambda reached: repository.holdings(_holding(selection)).map(
-                lambda held: ranked(artifact_rows(counted, reached, held), order, limit, search)
+    A kind narrows the rows, not what is counted: a plugin's row still adds up its skills' uses.
+    """
+
+    every = replace(selection, artifact_type=None)
+
+    def listed(rows: tuple[ArtifactRow, ...]) -> tuple[ArtifactRow, ...]:
+        kind = selection.artifact_type
+        return ranked(
+            tuple(row for row in rows if kind is None or row.artifact_type == kind),
+            order,
+            limit,
+            search,
+        )
+
+    return repository.tallies(every).bind(
+        lambda counted: repository.reach(every).bind(
+            lambda reached: repository.holdings(_holding(every)).map(
+                lambda held: listed(artifact_rows(counted, reached, held))
             )
         )
     )
