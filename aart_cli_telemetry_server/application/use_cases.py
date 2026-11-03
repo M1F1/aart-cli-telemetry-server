@@ -14,7 +14,9 @@ from aart_cli_telemetry_server.domain.artifacts import (
     ArtifactDetail,
     ArtifactRow,
     ClientVersion,
+    Dimension,
     EventView,
+    Group,
     Order,
     Selection,
     artifact_detail,
@@ -172,3 +174,11 @@ def client_versions(
     selection: Selection, repository: EventRepository
 ) -> IOResult[tuple[ClientVersion, ...], StorageError]:
     return repository.client_versions(selection)
+
+
+def breakdown(
+    selection: Selection, by: tuple[Dimension, ...], limit: int, repository: EventRepository
+) -> IOResult[tuple[Group, ...], StorageError]:
+    """The selected events grouped by `by`, most first."""
+
+    return repository.breakdown(selection, by, limit)

@@ -19,13 +19,16 @@ from returns.io import IOResult
 from aart_cli_telemetry_server.application import use_cases
 from aart_cli_telemetry_server.application.ports import Clock, EventRepository
 from aart_cli_telemetry_server.domain.artifacts import (
+    MAX_DIMENSIONS,
     MAX_EVENTS,
+    MAX_GROUPS,
     ArtifactDetail,
+    Dimension,
     EventView,
     Order,
     Selection,
 )
-from aart_cli_telemetry_server.domain.events import EventType, Source, stamp
+from aart_cli_telemetry_server.domain.events import EventType, Interface, Scope, Source, stamp
 from aart_cli_telemetry_server.domain.stats import MAX_DAYS
 
 from . import documents
@@ -74,8 +77,13 @@ def period(
     source: Source | None = None,
     client_version: str | None = None,
     automated: bool | None = None,
+    harness: str | None = None,
+    scope: Scope | None = None,
+    registry: str | None = None,
+    interface: Interface | None = None,
 ) -> Selection:
-    """The events of the last `days` before `now`, or from `since`, and of who sent them."""
+    """The events of the last `days` before `now`, or from `since`, and of who sent them,
+    where and how."""
 
     return Selection(
         since=_utc(since) or now.astimezone(UTC) - timedelta(days=days),
@@ -83,6 +91,10 @@ def period(
         source=source,
         client_version=client_version,
         automated=automated,
+        harness=harness,
+        scope=scope,
+        registry=registry,
+        interface=interface,
     )
 
 
@@ -106,6 +118,17 @@ def read_router(repository: EventRepository, clock: Clock, answer: Answer) -> AP
             bool | None,
             Query(description="Only automation such as CI (true), only people (false)."),
         ] = None,
+        harness: Annotated[
+            str | None,
+            Query(max_length=64, description="Only this harness: claude, opencode, ..."),
+        ] = None,
+        scope: Annotated[Scope | None, Query(description="Only user or project scope.")] = None,
+        registry: Annotated[
+            str | None, Query(max_length=64, description="Only from this Registry alias.")
+        ] = None,
+        interface: Annotated[
+            Interface | None, Query(description="Only what was asked for in the TUI or CLI.")
+        ] = None,
     ) -> Selection:
         return period(
             clock(),
@@ -115,6 +138,10 @@ def read_router(repository: EventRepository, clock: Clock, answer: Answer) -> AP
             source=source,
             client_version=client_version,
             automated=automated,
+            harness=harness,
+            scope=scope,
+            registry=registry,
+            interface=interface,
         )
 
     Period = Annotated[Selection, Depends(selection)]
@@ -186,17 +213,7 @@ def read_router(repository: EventRepository, clock: Clock, answer: Answer) -> AP
 
         if members and artifact_id is None:
             raise HTTPException(422, "members needs artifact_id")
-        chosen = Selection(
-            since=selected.since,
-            until=selected.until,
-            event_type=event_type,
-            source=selected.source,
-            client_version=selected.client_version,
-            automated=selected.automated,
-            artifact_type=selected.artifact_type,
-            artifact_id=artifact_id,
-            members=members,
-        )
+        chosen = replace(selected, event_type=event_type, artifact_id=artifact_id, members=members)
 
         try:
             page = cursor(before)
@@ -205,6 +222,39 @@ def read_router(repository: EventRepository, clock: Clock, answer: Answer) -> AP
         return answer(
             use_cases.events(chosen, limit, page, repository),
             lambda found: documents.events_document(found, next_before(found, limit)),
+        )
+
+    @router.get("/breakdown")
+    def breakdown(
+        *,
+        selected: Selected,
+        by: Annotated[
+            list[Dimension],
+            Query(
+                min_length=1,
+                max_length=MAX_DIMENSIONS,
+                description="What to group by, 1 to 3 times: harness, scope, registry, ...",
+            ),
+        ],
+        event_type: Annotated[EventType | None, Query()] = None,
+        artifact_id: Annotated[str | None, Query(max_length=200)] = None,
+        members: Annotated[
+            bool, Query(description="With artifact_id, its plugin's skills too.")
+        ] = False,
+        limit: Annotated[int, Query(ge=1, le=MAX_GROUPS)] = 100,
+    ) -> Response:
+        """The selected events grouped by up to three dimensions, with how many installations
+        sent each group: most events first."""
+
+        if members and artifact_id is None:
+            raise HTTPException(422, "members needs artifact_id")
+        if len(set(by)) != len(by):
+            raise HTTPException(422, "each dimension once")
+        chosen = replace(selected, event_type=event_type, artifact_id=artifact_id, members=members)
+        dimensions = tuple(by)
+        return answer(
+            use_cases.breakdown(chosen, dimensions, limit, repository),
+            lambda found: documents.breakdown_document(dimensions, found),
         )
 
     @router.get("/client-versions")

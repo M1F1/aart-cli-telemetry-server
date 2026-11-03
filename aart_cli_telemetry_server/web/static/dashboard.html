@@ -45,6 +45,21 @@
       <tbody id="artifacts"></tbody>
     </table>
   </section>
+  <section class="panel">
+    <h2>Breakdown</h2>
+    <p class="muted">The events of the period grouped by up to three things they said: which harness, scope, Registry, TUI or CLI, how it came, and more. A use that names no harness is its source's; an event that did not say a thing is in the group <em>not said</em>.</p>
+    <div class="filters">
+      <label>By <select id="by-1" class="dimension"></select></label>
+      <label>then <select id="by-2" class="dimension"><option value="">nothing</option></select></label>
+      <label>then <select id="by-3" class="dimension"><option value="">nothing</option></select></label>
+      <label>Event <select id="breakdown-event"><option value="">any</option><option>artifact.installed</option><option>artifact.updated</option><option>artifact.removed</option><option>artifact.used</option><option>unmanaged.used</option><option>aart_cli.failed</option></select></label>
+      <label>Sent by <select id="breakdown-who"><option value="">anyone</option><option value="false">people</option><option value="true">automation</option></select></label>
+    </div>
+    <table>
+      <thead><tr id="breakdown-head"></tr></thead>
+      <tbody id="breakdown"></tbody>
+    </table>
+  </section>
   <section class="panel" id="detail" hidden>
     <h2 id="detail-title"></h2>
     <p class="muted" id="detail-meta"></p>
@@ -62,7 +77,7 @@
     </div>
     <h3>Latest events</h3>
     <table>
-      <thead><tr><th>When (UTC)</th><th>Event</th><th>Artifact</th><th>Version</th><th>Source</th><th>Installation</th><th>aart-cli</th></tr></thead>
+      <thead><tr><th>When (UTC)</th><th>Event</th><th>Artifact</th><th>Version</th><th>Source</th><th>Harness</th><th>Scope</th><th>Registry</th><th>How</th><th>Installation</th><th>aart-cli</th></tr></thead>
       <tbody id="detail-events"></tbody>
     </table>
   </section>

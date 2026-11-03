@@ -15,21 +15,34 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from enum import StrEnum
 
-from .events import EventType, Source, StoredEvent
+from .events import (
+    HARNESS_OF,
+    Context,
+    Environment,
+    EventType,
+    Interface,
+    Scope,
+    Source,
+    StoredEvent,
+)
 
 __all__ = [
     "EPOCH",
     "MANAGED",
+    "MAX_DIMENSIONS",
     "MAX_EVENTS",
+    "MAX_GROUPS",
     "ArtifactDetail",
     "ArtifactRow",
     "ClientVersion",
     "DayRow",
+    "Dimension",
     "EventView",
+    "Group",
     "Holding",
     "Order",
     "Reach",
@@ -39,9 +52,14 @@ __all__ = [
     "VersionRow",
     "artifact_detail",
     "artifact_rows",
+    "breakdown",
+    "check_breakdown",
     "client_versions",
+    "dimension_value",
+    "harness_of",
     "holdings",
     "member_of",
+    "ordered_groups",
     "ordered_versions",
     "ranked",
     "reach",
@@ -64,10 +82,11 @@ EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 class Selection:
     """Which events count.
 
-    Those at or after `since` and before `until`, of the `event_type`, `source`, `client_version`
-    and automation asked for. With `artifact_id`, those about that artifact, of `artifact_type`
-    when given; with `members` as well, those about its members, the skills named
-    `<artifact_id>:<member>`. Without `artifact_id`, those of `artifact_type` when given.
+    Those at or after `since` and before `until`, of the `event_type`, `source`, `client_version`,
+    automation, harness, scope, Registry and interface asked for. With `artifact_id`, those about
+    that artifact, of `artifact_type` when given; with `members` as well, those about its members,
+    the skills named `<artifact_id>:<member>`. Without `artifact_id`, those of `artifact_type` when
+    given.
     """
 
     since: datetime
@@ -80,6 +99,11 @@ class Selection:
     artifact_type: str | None = None
     artifact_id: str | None = None
     members: bool = False
+    #: The harness, as `harness_of` names it.
+    harness: str | None = None
+    scope: Scope | None = None
+    registry: str | None = None
+    interface: Interface | None = None
 
     def __post_init__(self) -> None:
         for moment in (self.since, self.until):
@@ -97,6 +121,10 @@ class Selection:
             and (self.source is None or event.source is self.source)
             and (self.client_version is None or stored.client_version == self.client_version)
             and (self.automated is None or stored.automated is self.automated)
+            and (self.harness is None or harness_of(stored) == self.harness)
+            and (self.scope is None or event.context.scope is self.scope)
+            and (self.registry is None or event.context.registry == self.registry)
+            and (self.interface is None or event.context.interface is self.interface)
             and self._about(event.artifact_type, event.artifact_id)
         )
 
@@ -107,6 +135,13 @@ class Selection:
             self.artifact_type is None or kind == self.artifact_type
         )
         return own or (self.members and _member(kind, name, self.artifact_id))
+
+
+def harness_of(stored: StoredEvent) -> str | None:
+    """The harness an event names, or, for a use that names none, the one its source is."""
+
+    event = stored.event
+    return event.context.harness or HARNESS_OF.get(event.source)
 
 
 def member_of(artifact_type: str, artifact_id: str) -> str | None:
@@ -256,6 +291,8 @@ class EventView:
     client_id: str
     client_version: str
     automated: bool
+    context: Context = field(default_factory=Context)
+    environment: Environment | None = None
 
 
 def _newest_first(view: EventView) -> tuple[datetime, str]:
@@ -285,6 +322,8 @@ def recent(
             stored.client_id,
             stored.client_version,
             stored.automated,
+            stored.event.context,
+            stored.environment,
         )
         for stored in events
         if selection.holds(stored)
@@ -579,3 +618,112 @@ def artifact_detail(
         for source, n in sorted(by_source.items(), key=lambda item: (-item[1], item[0].value))
     )
     return ArtifactDetail(artifact, tuple(versions), days, sources, members)
+
+
+class Dimension(StrEnum):
+    """What a breakdown groups events by."""
+
+    EVENT_TYPE = "event_type"
+    SOURCE = "source"
+    ARTIFACT_TYPE = "artifact_type"
+    ARTIFACT_ID = "artifact_id"
+    ARTIFACT_VERSION = "artifact_version"
+    CLIENT_VERSION = "client_version"
+    AUTOMATED = "automated"
+    DAY = "day"
+    HARNESS = "harness"
+    SCOPE = "scope"
+    REGISTRY = "registry"
+    INTERFACE = "interface"
+    VIA = "via"
+    COLLECTION = "collection"
+    PREVIOUS_VERSION = "previous_version"
+    TOOL = "tool"
+    OS = "os"
+    ARCH = "arch"
+    PYTHON = "python"
+
+
+#: The most dimensions one breakdown groups by, and the most groups it lists.
+MAX_DIMENSIONS = 3
+MAX_GROUPS = 1000
+
+
+def dimension_value(stored: StoredEvent, dimension: Dimension) -> str | None:
+    """What `stored` is in `dimension`, as a string; `None` when it does not say."""
+
+    event, context, environment = stored.event, stored.event.context, stored.environment
+    match dimension:
+        case Dimension.EVENT_TYPE:
+            return event.event_type.value
+        case Dimension.SOURCE:
+            return event.source.value
+        case Dimension.ARTIFACT_TYPE:
+            return event.artifact_type
+        case Dimension.ARTIFACT_ID:
+            return event.artifact_id
+        case Dimension.ARTIFACT_VERSION:
+            return event.artifact_version
+        case Dimension.CLIENT_VERSION:
+            return stored.client_version
+        case Dimension.AUTOMATED:
+            return "true" if stored.automated else "false"
+        case Dimension.DAY:
+            return stored.occurred_day.isoformat()
+        case Dimension.HARNESS:
+            return harness_of(stored)
+        case Dimension.OS | Dimension.ARCH | Dimension.PYTHON:
+            return None if environment is None else str(getattr(environment, dimension.value))
+    value = getattr(context, dimension.value)
+    return None if value is None else str(value.value if isinstance(value, StrEnum) else value)
+
+
+@dataclass(frozen=True, slots=True)
+class Group:
+    """The selected events that are `values` in a breakdown's dimensions, and how many
+    installations sent them."""
+
+    values: tuple[str | None, ...]
+    events: int
+    clients: int
+
+
+def _group_order(group: Group) -> tuple[int, int, tuple[tuple[bool, str], ...]]:
+    return (
+        -group.events,
+        -group.clients,
+        tuple((value is not None, value or "") for value in group.values),
+    )
+
+
+def breakdown(
+    events: Iterable[StoredEvent], selection: Selection, by: tuple[Dimension, ...], limit: int
+) -> tuple[Group, ...]:
+    """The selected events grouped by `by`: most events first, then most installations, then
+    the values, a group that does not say before one that does; at most `limit`."""
+
+    check_breakdown(by, limit)
+    counted: Counter[tuple[str | None, ...]] = Counter()
+    clients: dict[tuple[str | None, ...], set[str]] = {}
+    for stored in events:
+        if not selection.holds(stored):
+            continue
+        key = tuple(dimension_value(stored, dimension) for dimension in by)
+        counted[key] += 1
+        clients.setdefault(key, set()).add(stored.client_id)
+    return ordered_groups((Group(key, n, len(clients[key])) for key, n in counted.items()), limit)
+
+
+def ordered_groups(groups: Iterable[Group], limit: int) -> tuple[Group, ...]:
+    """`groups` in a breakdown's order, at most `limit`: every repository orders them so."""
+
+    return tuple(sorted(groups, key=_group_order)[:limit])
+
+
+def check_breakdown(by: tuple[Dimension, ...], limit: int) -> None:
+    """Refuse a breakdown no repository answers."""
+
+    if not 1 <= len(by) <= MAX_DIMENSIONS or len(set(by)) != len(by):
+        raise ValueError(f"a breakdown is by 1 to {MAX_DIMENSIONS} distinct dimensions")
+    if not 1 <= limit <= MAX_GROUPS:
+        raise ValueError(f"a breakdown lists 1 to {MAX_GROUPS} groups")

@@ -22,6 +22,7 @@ from .test_read_api import _superpowers
 
 _TOOLS = {
     "summary",
+    "breakdown",
     "list_artifacts",
     "get_artifact",
     "list_events",

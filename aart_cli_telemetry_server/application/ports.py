@@ -11,7 +11,9 @@ from returns.io import IOResult
 
 from aart_cli_telemetry_server.domain.artifacts import (
     ClientVersion,
+    Dimension,
     EventView,
+    Group,
     Holding,
     Reach,
     Selection,
@@ -84,3 +86,7 @@ class EventRepository(Protocol):
     def client_versions(
         self, selection: Selection
     ) -> IOResult[tuple[ClientVersion, ...], StorageError]: ...
+
+    def breakdown(
+        self, selection: Selection, by: tuple[Dimension, ...], limit: int
+    ) -> IOResult[tuple[Group, ...], StorageError]: ...

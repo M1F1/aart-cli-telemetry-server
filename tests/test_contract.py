@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import string
 from collections.abc import Callable
@@ -24,7 +25,14 @@ from aart_cli_telemetry_server.domain.contract import (
     RefusalKind,
     read_batch,
 )
-from aart_cli_telemetry_server.domain.events import SOURCES_FOR, Batch, Event, EventType, Source
+from aart_cli_telemetry_server.domain.events import (
+    SOURCES_FOR,
+    Batch,
+    Context,
+    Event,
+    EventType,
+    Source,
+)
 
 from .strategies import events, request
 
@@ -41,7 +49,10 @@ EVENT_FIELDS = {
     "failure",
 }
 #: The fields an event may leave out; the failure is only aart_cli.failed's.
-OPTIONAL_EVENT_FIELDS = {"artifact_version", "failure"}
+#: Where and how an event happened (revision 7): each optional.
+CONTEXT_FIELDS = {item.name for item in dataclasses.fields(Context)}
+EVENT_FIELDS |= CONTEXT_FIELDS
+OPTIONAL_EVENT_FIELDS = {"artifact_version", "failure"} | CONTEXT_FIELDS
 
 
 _FAILED = next(example["request"] for example in EXAMPLES["valid"] if "failure" in example["name"])
@@ -225,7 +236,7 @@ def test_a_value_of_the_wrong_type_is_refused_never_coerced(item: Event, value: 
 
 _ENVELOPE = (
     "the request must hold exactly schema_version, client_id, client_version and events, "
-    "and may hold automated"
+    "and may hold automated and environment"
 )
 
 

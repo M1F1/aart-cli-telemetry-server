@@ -26,8 +26,15 @@ from returns.result import Failure, Success
 
 from aart_cli_telemetry_server.application import use_cases
 from aart_cli_telemetry_server.application.ports import Clock, EventRepository
-from aart_cli_telemetry_server.domain.artifacts import MAX_EVENTS, Order, Selection
-from aart_cli_telemetry_server.domain.events import EventType, Source
+from aart_cli_telemetry_server.domain.artifacts import (
+    MAX_DIMENSIONS,
+    MAX_EVENTS,
+    MAX_GROUPS,
+    Dimension,
+    Order,
+    Selection,
+)
+from aart_cli_telemetry_server.domain.events import EventType, Interface, Scope, Source
 from aart_cli_telemetry_server.domain.stats import MAX_DAYS, MAX_TOP
 from aart_cli_telemetry_server.effects import perform
 
@@ -50,7 +57,9 @@ _INSTRUCTIONS = (
     "Read-only statistics of the artifacts aart-cli installs: which were installed, updated, "
     "removed and used, by how many installations, on which versions, and the failures aart-cli "
     "met. An installation is a pseudonymous id, never a person. A plugin's skill is the artifact "
-    "`skill` named `<plugin>:<skill>`. Start with list_artifacts; get_artifact gives one in detail."
+    "`skill` named `<plugin>:<skill>`. Every tool can leave out CI with automated=false. Start "
+    "with list_artifacts; get_artifact gives one in detail; breakdown groups by harness, scope, "
+    "Registry, interface and more."
 )
 
 
@@ -69,6 +78,14 @@ class _Period(_Arguments):
     automated: bool | None = Field(
         None, description="Only automation such as CI (true), only people (false)."
     )
+    harness: str | None = Field(
+        None, max_length=64, description="Only this harness: claude, opencode, ..."
+    )
+    scope: Scope | None = Field(None, description="Only user or project scope.")
+    registry: str | None = Field(None, max_length=64, description="Only this Registry alias.")
+    interface: Interface | None = Field(
+        None, description="Only what was asked for in the TUI or the CLI."
+    )
 
     def selection(self, now: datetime) -> Selection:
         return period(
@@ -79,6 +96,10 @@ class _Period(_Arguments):
             source=self.source,
             client_version=self.client_version,
             automated=self.automated,
+            harness=self.harness,
+            scope=self.scope,
+            registry=self.registry,
+            interface=self.interface,
         )
 
 
@@ -108,6 +129,18 @@ class _ListEvents(_Kinded):
     members: bool = Field(False, description="With artifact_id, its plugin's skills too.")
     limit: int = Field(50, ge=1, le=MAX_EVENTS)
     before: str | None = Field(None, description="The next_before of the previous page.")
+
+
+class _Breakdown(_Kinded):
+    by: list[Dimension] = Field(
+        min_length=1,
+        max_length=MAX_DIMENSIONS,
+        description="What to group by, 1 to 3 distinct dimensions.",
+    )
+    event_type: EventType | None = None
+    artifact_id: str | None = Field(None, max_length=200)
+    members: bool = Field(False, description="With artifact_id, its plugin's skills too.")
+    limit: int = Field(100, ge=1, le=MAX_GROUPS)
 
 
 class _Days(_Arguments):
@@ -150,6 +183,23 @@ def _events(arguments: _ListEvents, repository: EventRepository, clock: Clock) -
     )
     return use_cases.events(chosen, arguments.limit, cursor(arguments.before), repository).map(
         lambda found: documents.events_document(found, next_before(found, arguments.limit))
+    )
+
+
+def _breakdown(arguments: _Breakdown, repository: EventRepository, clock: Clock) -> Any:
+    if arguments.members and arguments.artifact_id is None:
+        raise ValueError("members needs artifact_id")
+    if len(set(arguments.by)) != len(arguments.by):
+        raise ValueError("each dimension once")
+    chosen = replace(
+        arguments.selection(clock()),
+        event_type=arguments.event_type,
+        artifact_id=arguments.artifact_id,
+        members=arguments.members,
+    )
+    by = tuple(arguments.by)
+    return use_cases.breakdown(chosen, by, arguments.limit, repository).map(
+        lambda found: documents.breakdown_document(by, found)
     )
 
 
@@ -201,6 +251,16 @@ _TOOLS = (
         "page.",
         _ListEvents,
         _events,
+    ),
+    _Tool(
+        "breakdown",
+        "Events grouped by up to three dimensions -- harness, scope (user or project), Registry, "
+        "interface (TUI or CLI), via (direct, collection, plugin), collection, tool, automated, "
+        "event_type, artifact, version, previous_version, client_version, day, os, arch, "
+        "python -- with how many installations sent each group. Use it for questions such as "
+        "which harness installs what, or what people rather than CI install.",
+        _Breakdown,
+        _breakdown,
     ),
     _Tool(
         "client_versions",

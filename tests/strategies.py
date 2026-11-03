@@ -10,13 +10,20 @@ from hypothesis import strategies as st
 
 from aart_cli_telemetry_server.domain.artifacts import EPOCH, Selection
 from aart_cli_telemetry_server.domain.events import (
+    CONTEXT_FOR,
+    HARNESS_OF,
     SOURCES_FOR,
     Cause,
+    Context,
+    Environment,
     Event,
     EventType,
     Failure,
+    Interface,
+    Scope,
     Source,
     StoredEvent,
+    Via,
     fingerprint,
 )
 
@@ -104,6 +111,54 @@ def failed(
     )
 
 
+HARNESSES = ("claude", "opencode", "codex")
+REGISTRIES = ("company", "local-1")
+
+
+@st.composite
+def contexts(draw: st.DrawFn, event_type: EventType, source: Source, artifact_type: str) -> Context:
+    """A context the contract allows this event, each field seldom given."""
+
+    def seldom(name: str, values: st.SearchStrategy[_V]) -> _V | None:
+        allowed = event_type in CONTEXT_FOR[name]
+        return draw(values) if allowed and draw(st.integers(0, 2)) == 0 else None
+
+    harness = HARNESS_OF.get(source)
+    via = seldom("via", st.sampled_from(list(Via)))
+    collected = via is Via.COLLECTION and draw(st.booleans())
+    return Context(
+        harness=seldom(
+            "harness", st.sampled_from(HARNESSES) if harness is None else st.just(harness)
+        ),
+        scope=seldom("scope", st.sampled_from(list(Scope))),
+        registry=seldom("registry", st.sampled_from(REGISTRIES)),
+        interface=seldom("interface", st.sampled_from(list(Interface))),
+        previous_version=seldom("previous_version", st.sampled_from(("1.0.0", "2.1.0"))),
+        via=via if via is not Via.COLLECTION or collected else Via.DIRECT,
+        collection="starter-kit" if collected else None,
+        collection_version=(draw(st.none() | st.just("3.0.0")) if collected else None),
+        package_digest=seldom("package_digest", st.just("sha256:" + "ab" * 32)),
+        duration_ms=seldom("duration_ms", st.integers(0, 90_000)),
+        configuration_inputs=seldom("configuration_inputs", st.integers(0, 3)),
+        credential_inputs=seldom("credential_inputs", st.integers(0, 2)),
+        tool=(
+            seldom("tool", st.sampled_from(("create_issue", "search")))
+            if artifact_type == "mcp"
+            else None
+        ),
+        session=seldom("session", st.sampled_from(SESSIONS)),
+    )
+
+
+SESSIONS = ("5a1f0c2e-1b2c-4d3e-8f40-516273849a5b", "6b2f1d3e-2c3d-4e4f-9a51-62738495ab6c")
+environments = st.none() | st.builds(
+    Environment,
+    st.sampled_from(("darwin", "linux", "windows", "other")),
+    st.sampled_from(("arm64", "x86_64")),
+    st.sampled_from(("3.11.9", "3.12.4")),
+)
+
+
 @st.composite
 def events(
     draw: st.DrawFn, ids: st.SearchStrategy[str] = uuids, *, recurring: bool = False
@@ -111,11 +166,13 @@ def events(
     kind = draw(st.sampled_from(list(EventType)))
     if kind is EventType.FAILED:
         return draw(failed(ids, recurring=recurring))
+    source = draw(st.sampled_from(sorted(SOURCES_FOR[kind])))
+    artifact_type = draw(kinds)
     return Event(
         event_id=draw(ids),
         occurred_at=draw(moments),
         event_type=kind,
-        source=draw(st.sampled_from(sorted(SOURCES_FOR[kind]))),
+        source=source,
         artifact_id=draw(
             st.sampled_from(
                 (
@@ -132,8 +189,9 @@ def events(
             )
             | names
         ),
-        artifact_type=draw(kinds),
+        artifact_type=artifact_type,
         artifact_version=None if kind is EventType.UNMANAGED_USED else draw(versions),
+        context=draw(contexts(kind, source, artifact_type)),
     )
 
 
@@ -145,6 +203,7 @@ def stored_events(draw: st.DrawFn) -> StoredEvent:
         client_version=draw(st.sampled_from(("0.22.0", "0.24.0"))),
         received_at=NOW,
         automated=draw(st.booleans()),
+        environment=draw(environments),
     )
 
 
@@ -162,8 +221,8 @@ def selections(draw: st.DrawFn) -> Selection:
     """Any selection, leaning to the names, versions and moments histories hold, each filter
     seldom set, so most selections hold some of a history."""
 
-    def seldom(values: st.SearchStrategy[_V]) -> _V | None:
-        return draw(values) if draw(st.integers(0, 3)) == 0 else None
+    def seldom(values: st.SearchStrategy[_V], odds: int = 4) -> _V | None:
+        return draw(values) if draw(st.integers(1, odds)) == 1 else None
 
     artifact_id = seldom(st.sampled_from(("github", "superpowers", "super_powers", "Zeta")) | names)
     since = draw(st.just(EPOCH) | moments)
@@ -178,6 +237,10 @@ def selections(draw: st.DrawFn) -> Selection:
         artifact_type=seldom(kinds),
         artifact_id=artifact_id,
         members=artifact_id is not None and draw(st.booleans()),
+        harness=seldom(st.sampled_from(HARNESSES), 10),
+        scope=seldom(st.sampled_from(list(Scope)), 10),
+        registry=seldom(st.sampled_from(REGISTRIES), 10),
+        interface=seldom(st.sampled_from(list(Interface)), 10),
     )
 
 
@@ -218,6 +281,9 @@ def wire(event: Event) -> dict[str, Any]:
         document["artifact_version"] = event.artifact_version
     if event.failure is not None:
         document["failure"] = failure_document(event.failure)
+    for name in event.context.given():
+        value = getattr(event.context, name)
+        document[name] = getattr(value, "value", value)
     return document
 
 
@@ -238,21 +304,33 @@ def failure_document(failure: Failure) -> dict[str, Any]:
     return document
 
 
-def request(items: list[Event], client_id: str = CLIENTS[0]) -> bytes:
-    return json.dumps(
-        {
-            "schema_version": 1,
-            "client_id": client_id,
-            "client_version": "0.22.0",
-            "events": [wire(item) for item in items],
+def request(
+    items: list[Event], client_id: str = CLIENTS[0], environment: Environment | None = None
+) -> bytes:
+    document: dict[str, Any] = {
+        "schema_version": 1,
+        "client_id": client_id,
+        "client_version": "0.22.0",
+        "events": [wire(item) for item in items],
+    }
+    if environment is not None:
+        document["environment"] = {
+            "os": environment.os,
+            "arch": environment.arch,
+            "python": environment.python,
         }
-    ).encode()
+    return json.dumps(document).encode()
 
 
 __all__ = [
     "CLIENTS",
+    "HARNESSES",
     "NOW",
+    "REGISTRIES",
+    "SESSIONS",
     "Source",
+    "contexts",
+    "environments",
     "events",
     "failed",
     "failure_document",

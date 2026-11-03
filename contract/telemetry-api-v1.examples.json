@@ -215,6 +215,70 @@
           }
         ]
       }
+    },
+    {
+      "name": "where and how: an install from the TUI with its context, a use of an MCP's tool, and the environment (revision 7)",
+      "request": {
+        "schema_version": 1,
+        "client_id": "0b6f4d1e-8f8a-4a43-9a52-2f0f5d0f6a11",
+        "client_version": "0.29.0",
+        "environment": {
+          "os": "darwin",
+          "arch": "arm64",
+          "python": "3.11.9"
+        },
+        "events": [
+          {
+            "event_id": "6e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a01",
+            "occurred_at": "2026-11-03T18:00:00Z",
+            "event_type": "artifact.installed",
+            "source": "aart_cli",
+            "artifact_id": "superpowers",
+            "artifact_type": "plugin",
+            "artifact_version": "6.2.0",
+            "harness": "opencode",
+            "scope": "user",
+            "registry": "company",
+            "interface": "tui",
+            "via": "collection",
+            "collection": "starter-kit",
+            "collection_version": "3.0.0",
+            "package_digest": "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+            "duration_ms": 4210,
+            "configuration_inputs": 0,
+            "credential_inputs": 0
+          },
+          {
+            "event_id": "6e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a02",
+            "occurred_at": "2026-11-03T18:01:00Z",
+            "event_type": "artifact.updated",
+            "source": "aart_cli",
+            "artifact_id": "jira-mcp",
+            "artifact_type": "mcp",
+            "artifact_version": "2.1.0",
+            "harness": "claude",
+            "scope": "project",
+            "registry": "company",
+            "interface": "cli",
+            "previous_version": "2.0.1",
+            "via": "direct"
+          },
+          {
+            "event_id": "6e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a03",
+            "occurred_at": "2026-11-03T18:05:00Z",
+            "event_type": "artifact.used",
+            "source": "claude_hook",
+            "artifact_id": "jira-mcp",
+            "artifact_type": "mcp",
+            "artifact_version": "2.1.0",
+            "harness": "claude",
+            "scope": "project",
+            "registry": "company",
+            "tool": "create_issue",
+            "session": "5a1f0c2e-1b2c-4d3e-8f40-516273849a5b"
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -546,6 +610,77 @@
           "python": "3.11.9",
           "platform": "darwin"
         }
+      }
+    },
+    {
+      "name": "a tool of a skill",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000101",
+        "event_type": "artifact.used",
+        "source": "opencode_plugin",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill",
+        "tool": "search",
+        "occurred_at": "2026-11-03T18:00:00Z",
+        "artifact_version": "1.0.0"
+      }
+    },
+    {
+      "name": "a use whose harness is not its source's",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000102",
+        "event_type": "artifact.used",
+        "source": "claude_hook",
+        "artifact_id": "release-notes",
+        "artifact_type": "skill",
+        "harness": "opencode",
+        "occurred_at": "2026-11-03T18:00:00Z",
+        "artifact_version": "1.0.0"
+      }
+    },
+    {
+      "name": "a previous version of an install",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000103",
+        "event_type": "artifact.installed",
+        "source": "aart_cli",
+        "artifact_id": "jira-mcp",
+        "artifact_type": "mcp",
+        "previous_version": "0.9.0",
+        "occurred_at": "2026-11-03T18:00:00Z",
+        "artifact_version": "1.0.0"
+      }
+    },
+    {
+      "name": "a collection without via collection",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000104",
+        "event_type": "artifact.installed",
+        "source": "aart_cli",
+        "artifact_id": "jira-mcp",
+        "artifact_type": "mcp",
+        "via": "direct",
+        "collection": "starter-kit",
+        "occurred_at": "2026-11-03T18:00:00Z",
+        "artifact_version": "1.0.0"
+      }
+    },
+    {
+      "name": "a Registry that is an address",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000105",
+        "event_type": "artifact.installed",
+        "source": "aart_cli",
+        "artifact_id": "jira-mcp",
+        "artifact_type": "mcp",
+        "registry": "https://registry.example.invalid",
+        "occurred_at": "2026-11-03T18:00:00Z",
+        "artifact_version": "1.0.0"
       }
     }
   ]
