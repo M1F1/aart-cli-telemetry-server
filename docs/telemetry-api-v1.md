@@ -171,8 +171,9 @@ unsent until the server holds them. They are not marked rejected. Below revision
 leaves revision 7's fields out of each event and `environment` out of the request, and sends the
 rest unchanged: those fields only add to what an event says. `401`, `403`, `429`, `5xx`, a
 timeout or no connection are handled as they are for the batch. Any other answer -- a `404` from a
-server older than revision 6, or a `200` that names no revision -- means the client sends
-everything, as it did before, and handles a `422` as above.
+server older than revision 6, or a `200` that names no revision -- means the client sends as it
+did before revision 6: everything but revision 7's fields and `environment`, handling a `422` as
+above.
 
 ## Other endpoints of the server
 
