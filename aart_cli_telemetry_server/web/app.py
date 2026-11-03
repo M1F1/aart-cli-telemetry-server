@@ -19,6 +19,7 @@ from returns.result import Failure, Success
 from aart_cli_telemetry_server.application import use_cases
 from aart_cli_telemetry_server.application.ports import Clock, EventRepository, StorageError
 from aart_cli_telemetry_server.domain.contract import (
+    CONTRACT_REVISION,
     MAX_BODY_BYTES,
     Refusal,
     RefusalKind,
@@ -110,6 +111,11 @@ def create_app(repository: EventRepository, clock: Clock = _utc_now) -> FastAPI:
             use_cases.ingest(raw, repository, clock),
             lambda acknowledgement: {"acknowledged_event_ids": list(acknowledgement.event_ids)},
         )
+
+    @app.get("/api/v1/contract")
+    def contract() -> Response:
+        # A client asks before it sends, so this answers without the database.
+        return JSONResponse({"schema_version": 1, "revision": CONTRACT_REVISION})
 
     @app.get("/healthz")
     def healthz() -> Response:

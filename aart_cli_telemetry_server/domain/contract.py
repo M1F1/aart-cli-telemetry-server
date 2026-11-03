@@ -41,6 +41,7 @@ from .events import (
 from .events import Failure as FailureReport
 
 __all__ = [
+    "CONTRACT_REVISION",
     "MAX_BODY_BYTES",
     "MAX_EVENTS",
     "Refusal",
@@ -51,6 +52,9 @@ __all__ = [
 ]
 
 MAX_BODY_BYTES = 1024 * 1024
+#: The last revision of version 1 this server holds, as `GET /api/v1/contract` says it: the
+#: contract's table of revisions ends here.
+CONTRACT_REVISION = 6
 MAX_EVENTS = 500
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"

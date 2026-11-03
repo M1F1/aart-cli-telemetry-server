@@ -17,6 +17,8 @@ installations and automated ones apart, so fresh CI jobs do not read as new peop
 - **The contract** between aart-cli and this server is [`docs/telemetry-api-v1.md`](docs/telemetry-api-v1.md)
   with [`contract/telemetry-api-v1.examples.json`](contract/telemetry-api-v1.examples.json). Both
   repositories keep identical copies and test against them. This server never imports aart-cli.
+  `GET /api/v1/contract` says which revision of it this server holds, and aart-cli holds back what
+  an older server would refuse, so aart-cli may be released before the server is.
 - **Storage** is behind a port. A batch is stored in one transaction and acknowledged only after it
   committed; an `event_id` already stored is acknowledged and never counted again. The default is
   one SQLite database in WAL mode, owner-only (0600); `AART_CLI_TELEMETRY_DATABASE_URL` selects any

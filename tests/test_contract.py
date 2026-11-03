@@ -17,6 +17,7 @@ from returns.pipeline import is_successful
 from returns.result import Failure, Result, Success
 
 from aart_cli_telemetry_server.domain.contract import (
+    CONTRACT_REVISION,
     MAX_BODY_BYTES,
     MAX_EVENTS,
     Refusal,
@@ -327,3 +328,14 @@ def test_automated_is_true_or_false_and_never_coerced(value: object) -> None:
     document["automated"] = value
     refused = _refusal(document)
     assert (refused.error, refused.rejected_events) == ("automated must be true or false", ())
+
+
+def test_the_revision_a_server_says_is_the_last_the_contract_lists() -> None:
+    text = (ROOT / "docs" / "telemetry-api-v1.md").read_text("utf-8")
+    listed = [
+        int(line.split("|")[1])
+        for line in text[text.index("| Revision | Added |") :].splitlines()[2:]
+        if line.startswith("| ")
+    ]
+    assert listed == list(range(1, CONTRACT_REVISION + 1))
+    assert f'{{"schema_version": 1, "revision": {CONTRACT_REVISION}}}' in text
