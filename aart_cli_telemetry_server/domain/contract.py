@@ -33,9 +33,15 @@ from .events import (
     SOURCES_FOR,
     Batch,
     Cause,
+    Context,
+    Environment,
     Event,
     EventType,
+    Interface,
+    Scope,
     Source,
+    Via,
+    context_problem,
     fingerprint,
 )
 from .events import Failure as FailureReport
@@ -54,7 +60,7 @@ __all__ = [
 MAX_BODY_BYTES = 1024 * 1024
 #: The last revision of version 1 this server holds, as `GET /api/v1/contract` says it: the
 #: contract's table of revisions ends here.
-CONTRACT_REVISION = 6
+CONTRACT_REVISION = 7
 MAX_EVENTS = 500
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -62,6 +68,11 @@ _MOMENT = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})
 _NAME = r"^[0-9A-Za-z._@:+-]{1,200}$"
 _KIND = r"^[a-z0-9-]{1,64}$"
 _VERSION = r"^[0-9A-Za-z.+-]{1,64}$"
+_SLUG = r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+_DIGEST = r"^sha256:[0-9a-f]{64}$"
+#: The longest action a duration is kept for: a day.
+MAX_DURATION_MS = 86_400_000
+MAX_INPUTS = 1000
 _UUID_PATTERN = re.compile(_UUID)
 _PLACE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
 _MODULE_MAX = 128
@@ -151,6 +162,23 @@ class _FailureDocument(BaseModel):
         )
 
 
+Slug = Annotated[str, StringConstraints(pattern=_SLUG, max_length=64)]
+Version = Annotated[str, StringConstraints(pattern=_VERSION)]
+Name = Annotated[str, StringConstraints(pattern=_NAME)]
+Count = Annotated[int, Field(strict=True, ge=0, le=MAX_INPUTS)]
+
+
+class _EnvironmentDocument(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    os: Literal["darwin", "linux", "windows", "other"]
+    arch: Annotated[str, StringConstraints(pattern=r"^[a-z0-9_]{1,16}$")]
+    python: Annotated[str, StringConstraints(pattern=r"^[0-9A-Za-z.+-]{1,32}$")]
+
+    def environment(self) -> Environment:
+        return Environment(self.os, self.arch, self.python)
+
+
 class _EventDocument(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
@@ -169,6 +197,39 @@ class _EventDocument(BaseModel):
     artifact_type: Annotated[str, StringConstraints(pattern=_KIND)]
     artifact_version: Annotated[str, StringConstraints(pattern=_VERSION)] | None = None
     failure: _FailureDocument | None = None
+    # Revision 7: where and how it happened.
+    harness: Slug | None = None
+    scope: Literal["user", "project"] | None = None
+    registry: Slug | None = None
+    interface: Literal["tui", "cli"] | None = None
+    previous_version: Version | None = None
+    via: Literal["direct", "collection", "plugin"] | None = None
+    collection: Name | None = None
+    collection_version: Version | None = None
+    package_digest: Annotated[str, StringConstraints(pattern=_DIGEST)] | None = None
+    duration_ms: Annotated[int, Field(strict=True, ge=0, le=MAX_DURATION_MS)] | None = None
+    configuration_inputs: Count | None = None
+    credential_inputs: Count | None = None
+    tool: Name | None = None
+    session: Uuid | None = None
+
+    def context(self) -> Context:
+        return Context(
+            harness=self.harness,
+            scope=None if self.scope is None else Scope(self.scope),
+            registry=self.registry,
+            interface=None if self.interface is None else Interface(self.interface),
+            previous_version=self.previous_version,
+            via=None if self.via is None else Via(self.via),
+            collection=self.collection,
+            collection_version=self.collection_version,
+            package_digest=self.package_digest,
+            duration_ms=self.duration_ms,
+            configuration_inputs=self.configuration_inputs,
+            credential_inputs=self.credential_inputs,
+            tool=self.tool,
+            session=self.session,
+        )
 
     @model_validator(mode="after")
     def _source_reports_its_own_types(self) -> Self:
@@ -180,6 +241,11 @@ class _EventDocument(BaseModel):
             raise PydanticCustomError(
                 "unmanaged_version", "an unmanaged.used event has no artifact_version"
             )
+        problem = context_problem(
+            EventType(self.event_type), Source(self.source), self.artifact_type, self.context()
+        )
+        if problem is not None:
+            raise PydanticCustomError("event_context", problem)
         if self.event_type != EventType.FAILED.value:
             if self.failure is not None:
                 raise PydanticCustomError("failure_elsewhere", "only aart_cli.failed has a failure")
@@ -219,6 +285,7 @@ class _EventDocument(BaseModel):
             self.artifact_type,
             self.artifact_version,
             None if self.failure is None else self.failure.failure(),
+            self.context(),
         )
 
 
@@ -230,6 +297,7 @@ class _RequestDocument(BaseModel):
     client_version: Annotated[str, StringConstraints(pattern=_VERSION)]
     events: Annotated[list[Any], Field(min_length=1, max_length=MAX_EVENTS)]
     automated: bool = False
+    environment: _EnvironmentDocument | None = None
 
 
 _EVENTS = Annotated[list[_EventDocument], Field(min_length=1, max_length=MAX_EVENTS)]
@@ -263,7 +331,7 @@ class Refusal:
 
 _ENVELOPE = (
     "the request must hold exactly schema_version, client_id, client_version and events, "
-    "and may hold automated"
+    "and may hold automated and environment"
 )
 _ENVELOPE_REASONS = {
     "schema_version": "schema_version must be 1",
@@ -271,6 +339,7 @@ _ENVELOPE_REASONS = {
     "client_version": "client_version must be 1-64 characters of [0-9A-Za-z.+-]",
     "events": f"events must be a list of 1 to {MAX_EVENTS} events",
     "automated": "automated must be true or false",
+    "environment": "environment must be the contract's os, arch and python",
 }
 _EVENT_REASONS = {
     "event_id": "event_id must be a lowercase UUID",
@@ -281,6 +350,20 @@ _EVENT_REASONS = {
     "artifact_type": "artifact_type must be 1-64 characters of [a-z0-9-]",
     "artifact_version": "artifact_version must be 1-64 characters of [0-9A-Za-z.+-]",
     "failure": "failure must be the contract's failure object",
+    "harness": "harness must be a lowercase slug of 1-64 characters",
+    "scope": "scope must be user or project",
+    "registry": "registry must be a lowercase slug of 1-64 characters",
+    "interface": "interface must be tui or cli",
+    "previous_version": "previous_version must be 1-64 characters of [0-9A-Za-z.+-]",
+    "via": "via must be direct, collection or plugin",
+    "collection": "collection must be 1-200 characters of [0-9A-Za-z._@:+-]",
+    "collection_version": "collection_version must be 1-64 characters of [0-9A-Za-z.+-]",
+    "package_digest": "package_digest must be sha256: and 64 lowercase hex digits",
+    "duration_ms": f"duration_ms must be an integer from 0 to {MAX_DURATION_MS}",
+    "configuration_inputs": f"configuration_inputs must be an integer from 0 to {MAX_INPUTS}",
+    "credential_inputs": f"credential_inputs must be an integer from 0 to {MAX_INPUTS}",
+    "tool": "tool must be 1-200 characters of [0-9A-Za-z._@:+-]",
+    "session": "session must be a lowercase UUID",
 }
 #: Reasons the contract's own rules give, by the custom error each raises.
 _RULE_REASONS = {
@@ -300,7 +383,7 @@ def _envelope_reason(error: ErrorDetails) -> str:
     location = error["loc"]
     if not location:
         return "the request must be a JSON object"
-    if error["type"] == "missing":
+    if error["type"] == "missing" and len(location) == 1:
         return _ENVELOPE
     # A key the contract does not have is not in the table either, so it reads as the envelope.
     return _ENVELOPE_REASONS.get(str(location[0]), _ENVELOPE)
@@ -319,6 +402,9 @@ def _event_reason(error: ErrorDetails) -> str:
         return "an event must be an object"
     if kind == "missing":
         return f"missing {field}"
+    if kind == "event_context":
+        # The rule's own words, which name fields of the contract and never a submitted value.
+        return str(error["msg"])
     if kind in _RULE_REASONS:
         return _RULE_REASONS[str(kind)]
     return _EVENT_REASONS.get(field, "an event does not follow the contract")
@@ -377,5 +463,6 @@ def read_batch(raw: bytes) -> Result[Batch, Refusal]:
             request.client_version,
             tuple(item.event() for item in events),
             request.automated,
+            None if request.environment is None else request.environment.environment(),
         )
     )

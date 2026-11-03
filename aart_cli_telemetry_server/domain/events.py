@@ -5,21 +5,29 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields
 from datetime import UTC, date, datetime
 from enum import StrEnum
 
 __all__ = [
+    "CONTEXT_FOR",
     "FAILURE_KINDS",
+    "HARNESS_OF",
     "SOURCES_FOR",
     "Batch",
     "Cause",
+    "Context",
+    "Environment",
     "Event",
     "EventType",
     "Failure",
+    "Interface",
+    "Scope",
     "Source",
     "StoredEvent",
+    "Via",
     "acknowledged",
+    "context_problem",
     "fingerprint",
     "stamp",
     "stored_events",
@@ -114,6 +122,112 @@ def _utc(moment: datetime) -> None:
         raise ValueError("a moment is kept in UTC")
 
 
+class Scope(StrEnum):
+    """Whose configuration an installation is in."""
+
+    USER = "user"
+    PROJECT = "project"
+
+
+class Interface(StrEnum):
+    """Where a person asked for an install, update or removal."""
+
+    TUI = "tui"
+    CLI = "cli"
+
+
+class Via(StrEnum):
+    """How an artifact came to be installed: asked for itself, in a Collection, or in a plugin."""
+
+    DIRECT = "direct"
+    COLLECTION = "collection"
+    PLUGIN = "plugin"
+
+
+#: The harness a use's source is, so a use that names its harness names that one.
+HARNESS_OF: Mapping[Source, str] = {
+    Source.CLAUDE_HOOK: "claude",
+    Source.OPENCODE_PLUGIN: "opencode",
+}
+
+_LIFECYCLE = frozenset({EventType.INSTALLED, EventType.UPDATED, EventType.REMOVED})
+_PLACED = frozenset({EventType.INSTALLED, EventType.UPDATED})
+_USES = frozenset({EventType.USED, EventType.UNMANAGED_USED})
+
+
+@dataclass(frozen=True, slots=True)
+class Context:
+    """Where and how an event happened (revision 7). Every field is optional; each is held by
+    the event types `CONTEXT_FOR` names, and by no other."""
+
+    harness: str | None = None
+    scope: Scope | None = None
+    registry: str | None = None
+    interface: Interface | None = None
+    previous_version: str | None = None
+    via: Via | None = None
+    collection: str | None = None
+    collection_version: str | None = None
+    package_digest: str | None = None
+    duration_ms: int | None = None
+    configuration_inputs: int | None = None
+    credential_inputs: int | None = None
+    tool: str | None = None
+    session: str | None = None
+
+    def given(self) -> tuple[str, ...]:
+        """The names of the fields that hold something."""
+
+        return tuple(item.name for item in fields(self) if getattr(self, item.name) is not None)
+
+
+#: Which event types each context field may be given in.
+CONTEXT_FOR: Mapping[str, frozenset[EventType]] = {
+    "harness": _LIFECYCLE | _USES,
+    "scope": _LIFECYCLE | {EventType.USED},
+    "registry": _LIFECYCLE | {EventType.USED},
+    "interface": _LIFECYCLE,
+    "previous_version": frozenset({EventType.UPDATED}),
+    "via": _LIFECYCLE,
+    "collection": _LIFECYCLE,
+    "collection_version": _LIFECYCLE,
+    "package_digest": _PLACED,
+    "duration_ms": _LIFECYCLE,
+    "configuration_inputs": _PLACED,
+    "credential_inputs": _PLACED,
+    "tool": _USES,
+    "session": _USES,
+}
+
+
+def context_problem(
+    event_type: EventType, source: Source, artifact_type: str, context: Context
+) -> str | None:
+    """Why `context` cannot be this event's, in the contract's words; `None` when it can."""
+
+    if any(event_type not in CONTEXT_FOR[name] for name in context.given()):
+        return "this event_type does not hold that field"
+    if (context.collection is not None or context.collection_version is not None) and (
+        context.via is not Via.COLLECTION or context.collection is None
+    ):
+        return "a collection is named exactly when via is collection"
+    if context.tool is not None and artifact_type != "mcp":
+        return "a tool is an mcp's"
+    harness = HARNESS_OF.get(source)
+    if harness is not None and context.harness not in (None, harness):
+        return "a use's harness is its source's"
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class Environment:
+    """What a request says it was sent from (revision 7): no host, user or path."""
+
+    os: str
+    arch: str
+    python: str
+
+
 @dataclass(frozen=True, slots=True)
 class Event:
     """One event a client reported."""
@@ -126,9 +240,11 @@ class Event:
     artifact_type: str
     artifact_version: str | None
     failure: Failure | None = None
+    context: Context = field(default_factory=Context)
 
     def __post_init__(self) -> None:
         _utc(self.occurred_at)
+        self._context_is_its_own()
         if self.source not in SOURCES_FOR[self.event_type]:
             raise ValueError("this source cannot report this event type")
         if self.event_type is EventType.UNMANAGED_USED and self.artifact_version is not None:
@@ -141,6 +257,11 @@ class Event:
         ):
             raise ValueError("a failure has a kind and no version")
 
+    def _context_is_its_own(self) -> None:
+        problem = context_problem(self.event_type, self.source, self.artifact_type, self.context)
+        if problem is not None:
+            raise ValueError(problem)
+
 
 @dataclass(frozen=True, slots=True)
 class Batch:
@@ -151,6 +272,7 @@ class Batch:
     events: tuple[Event, ...]
     #: The installation said it runs as automation, such as a CI job, rather than for a person.
     automated: bool = False
+    environment: Environment | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +285,7 @@ class StoredEvent:
     received_at: datetime
     #: As the request that delivered it said; an event kept before keeps what its first said.
     automated: bool = False
+    environment: Environment | None = None
 
     def __post_init__(self) -> None:
         _utc(self.received_at)
@@ -185,7 +308,14 @@ def stored_events(batch: Batch, received_at: datetime) -> tuple[StoredEvent, ...
     for event in batch.events:
         seen.setdefault(
             event.event_id,
-            StoredEvent(event, batch.client_id, batch.client_version, received_at, batch.automated),
+            StoredEvent(
+                event,
+                batch.client_id,
+                batch.client_version,
+                received_at,
+                batch.automated,
+                batch.environment,
+            ),
         )
     return tuple(seen.values())
 

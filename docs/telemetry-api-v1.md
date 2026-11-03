@@ -49,6 +49,7 @@ other's code.
 | `client_id` | A lowercase UUID. Pseudonymous: aart-cli draws it at random when telemetry is turned on and draws a new one when its data is forgotten. It is not derived from the person, the machine or a path. |
 | `client_version` | The aart-cli version, 1–64 characters of `[0-9A-Za-z.+-]`. |
 | `automated` | Optional, `true` or `false`. `true` when aart-cli runs as automation -- a CI job, for one -- rather than for a person; aart-cli sends it only then, and a request without it is a person's. It says nothing more about the automation. |
+| `environment` | Optional (revision 7). `{"os": ..., "arch": ..., "python": ...}`, all three: `os` is `darwin`, `linux`, `windows` or `other`; `arch` 1–16 characters of `[a-z0-9_]` (`arm64`, `x86_64`); `python` 1–32 characters of `[0-9A-Za-z.+-]`. Nothing else: no host, user or path. |
 | `events` | 1–500 events. |
 
 Every event:
@@ -64,9 +65,32 @@ Every event:
 | `artifact_version` | Optional. 1–64 characters of `[0-9A-Za-z.+-]`. Never present in `unmanaged.used` or `aart_cli.failed`. |
 | `failure` | Present in `aart_cli.failed` and in no other event; see below. |
 
-No other field is accepted, in the request or in an event. In particular an event never carries a
-prompt, what a tool was called with, a file's content, a path, a project, a Registry address, a
-user name, a host name or any credential.
+An event may also say where and how it happened (below). No other field is accepted, in the
+request or in an event. In particular an event never carries a prompt, what a tool was called with,
+a file's content, a path, a project, a Registry address, a user name, a host name or any
+credential.
+
+### Where and how (revision 7)
+
+Every one of these is optional, and each is accepted only in the event types its row names; in any
+other it refuses the event (`this event_type does not hold that field`). Lifecycle is
+`artifact.installed`, `artifact.updated` and `artifact.removed`; a use is `artifact.used` and
+`unmanaged.used`. `aart_cli.failed` takes none of them.
+
+| Field | Events | Rule |
+|---|---|---|
+| `harness` | lifecycle, a use | The harness the installation is for, or the use was in: a lowercase slug, 1–64 characters of `[a-z0-9-]` starting with a letter, words joined by single `-` (`claude`, `opencode`, `codex`). A use's is its source's: `claude` for `claude_hook`, `opencode` for `opencode_plugin`; a use that names none is read as its source's. |
+| `scope` | lifecycle, `artifact.used` | `user` or `project`: whose configuration the installation is in. Never which project. |
+| `registry` | lifecycle, `artifact.used` | The alias of the Registry the artifact was installed from, a slug as above (`company`). Never its address. |
+| `interface` | lifecycle | `tui` or `cli`: where a person asked for it. |
+| `previous_version` | `artifact.updated` | The version it was updated or downgraded from, as `artifact_version`. |
+| `via` | lifecycle | `direct` (asked for itself), `collection` (as a member of a Collection) or `plugin` (a skill a plugin carries, §214). |
+| `collection`, `collection_version` | lifecycle | The Collection it came in, as `artifact_id`, and its version, as `artifact_version`: only with `via` `collection`, `collection` then required and `collection_version` optional. |
+| `package_digest` | `artifact.installed`, `artifact.updated` | The digest of the package installed: `sha256:` and 64 lowercase hex digits. |
+| `duration_ms` | lifecycle | How long the action that changed it took, an integer 0–86400000. Every artifact of one action has the action's. |
+| `configuration_inputs`, `credential_inputs` | `artifact.installed`, `artifact.updated` | How many configuration values and credentials the installation asked for, integers 0–1000. Never a value or a name. |
+| `tool` | a use | Which tool of an MCP was called, 1–200 characters of `[0-9A-Za-z._@:+-]`; only when `artifact_type` is `mcp`. Never what it was called with. |
+| `session` | a use | A lowercase UUID that stands for the harness's session the use was in, the same for every use of that session and drawn by aart-cli, so uses in one session can be counted together. Never the harness's own session id. |
 
 `artifact.used` is sent only for an artifact aart-cli installed and could name with certainty, and
 names that installation. `unmanaged.used` is a use of a skill or MCP that no artifact aart-cli
@@ -124,7 +148,7 @@ An error body never repeats a submitted value beyond the `event_id` and `index` 
 Version 1 has grown by additions, each a revision. A server says which it holds:
 
 ```json
-{"schema_version": 1, "revision": 6}
+{"schema_version": 1, "revision": 7}
 ```
 
 | Revision | Added |
@@ -135,6 +159,7 @@ Version 1 has grown by additions, each a revision. A server says which it holds:
 | 4 | The request's `automated`. |
 | 5 | A failure's `causes`. |
 | 6 | This endpoint. |
+| 7 | The request's `environment`, and an event's `harness`, `scope`, `registry`, `interface`, `previous_version`, `via`, `collection`, `collection_version`, `package_digest`, `duration_ms`, `configuration_inputs`, `credential_inputs`, `tool` and `session`. |
 
 The answer is `200` with that object. The client reads `schema_version` and `revision`, and ignores
 any other field. The server needs no database to answer it.
@@ -142,20 +167,26 @@ any other field. The server needs no database to answer it.
 The client asks before it sends, at most once per synchronisation. With a revision, it sends only
 what that revision holds. An event of a type the revision does not hold, a failure with `causes`
 below revision 5, and every event of a request that would carry `automated` below revision 4 wait
-unsent until the server holds them. They are not marked rejected. `401`, `403`, `429`, `5xx`, a
+unsent until the server holds them. They are not marked rejected. Below revision 7 the client
+leaves revision 7's fields out of each event and `environment` out of the request, and sends the
+rest unchanged: those fields only add to what an event says. `401`, `403`, `429`, `5xx`, a
 timeout or no connection are handled as they are for the batch. Any other answer -- a `404` from a
-server older than revision 6, or a `200` that names no revision -- means the client sends
-everything, as it did before, and handles a `422` as above.
+server older than revision 6, or a `200` that names no revision -- means the client sends as it
+did before revision 6: everything but revision 7's fields and `environment`, handling a `422` as
+above.
 
 ## Other endpoints of the server
 
-These are the server's own and not part of what aart-cli relies on.
+These are the server's own and not part of what aart-cli relies on. `GET /docs` describes them.
 
 - `GET /healthz` -- `{"status": "ok"}` when the database can be read.
 - `GET /dashboard` -- the dashboard.
+- `GET /api/v1/artifacts`, `/api/v1/artifacts/{artifact_type}/{artifact_id}`, `/api/v1/events`,
+  `/api/v1/breakdown`, `/api/v1/client-versions` -- the read API.
 - `GET /api/v1/stats/summary`, `/api/v1/stats/top-artifacts`, `/api/v1/stats/top-unmanaged`,
   `/api/v1/stats/failures`, `/api/v1/stats/daily`, `/api/v1/stats/by-source` -- the dashboard's
   aggregates.
+- `POST /mcp` -- the same reads as a read-only MCP server.
 
 ## Versioning
 

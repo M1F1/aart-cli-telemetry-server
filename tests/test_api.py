@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -16,6 +17,7 @@ from returns.io import IOFailure, IOResult
 from aart_cli_telemetry_server.adapters.memory import InMemoryEventRepository
 from aart_cli_telemetry_server.adapters.sql import SqlEventRepository, open_repository, sqlite_url
 from aart_cli_telemetry_server.application.ports import StorageError
+from aart_cli_telemetry_server.domain.artifacts import Dimension
 from aart_cli_telemetry_server.domain.contract import MAX_BODY_BYTES
 from aart_cli_telemetry_server.domain.events import StoredEvent
 from aart_cli_telemetry_server.effects import perform
@@ -216,6 +218,17 @@ def test_health_and_dashboard(client: TestClient) -> None:
     assert client.get("/static/chart.js.LICENSE.md").status_code == 404
 
 
+def test_the_dashboard_offers_every_breakdown_dimension_and_no_other(client: TestClient) -> None:
+    script = client.get("/static/dashboard.js").text
+    listed = script[
+        script.index("const DIMENSIONS = [") : script.index("];", script.index("const DIMENSIONS"))
+    ]
+
+    assert set(re.findall(r'\["([a-z_]+)", ', listed)) == {item.value for item in Dimension}
+    page = client.get("/dashboard").text
+    assert all(f'id="{name}"' in page for name in ("by-1", "by-2", "by-3", "breakdown"))
+
+
 class _Broken(InMemoryEventRepository):
     """A database that is down."""
 
@@ -241,4 +254,4 @@ def test_a_database_that_is_down_is_503_and_never_an_acknowledgement() -> None:
 def test_the_contract_endpoint_says_the_revision_and_needs_no_database() -> None:
     for repository in (InMemoryEventRepository(), _Broken()):
         answer = TestClient(create_app(repository, clock=lambda: NOW)).get("/api/v1/contract")
-        assert (answer.status_code, answer.json()) == (200, {"schema_version": 1, "revision": 6})
+        assert (answer.status_code, answer.json()) == (200, {"schema_version": 1, "revision": 7})

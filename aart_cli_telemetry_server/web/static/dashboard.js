@@ -18,6 +18,30 @@ function cell(text, className) {
 
 let chosen = null;
 
+// What a breakdown can group by, as `/api/v1/breakdown` names it, and what the panel calls it.
+const DIMENSIONS = [
+  ["harness", "harness"],
+  ["scope", "scope"],
+  ["registry", "Registry"],
+  ["interface", "TUI or CLI"],
+  ["via", "how it came"],
+  ["collection", "Collection"],
+  ["event_type", "event"],
+  ["artifact_type", "kind"],
+  ["artifact_id", "artifact"],
+  ["artifact_version", "version"],
+  ["previous_version", "updated from"],
+  ["tool", "MCP tool"],
+  ["source", "source"],
+  ["automated", "automation"],
+  ["client_version", "aart-cli"],
+  ["day", "day"],
+  ["os", "OS"],
+  ["arch", "architecture"],
+  ["python", "Python"],
+];
+const DIMENSION_NAMES = Object.fromEntries(DIMENSIONS);
+
 function query(params) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -68,6 +92,57 @@ async function artifacts(days) {
       });
       return tr;
     })
+  );
+}
+
+function dimensionOptions() {
+  for (const [index, select] of document.querySelectorAll("select.dimension").entries()) {
+    select.append(
+      ...DIMENSIONS.map(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        return option;
+      })
+    );
+    if (index === 0) select.value = "harness";
+  }
+}
+
+async function breakdown(days) {
+  const by = ["by-1", "by-2", "by-3"]
+    .map((id) => document.getElementById(id).value)
+    .filter((value, index, all) => value && all.indexOf(value) === index);
+  const search = new URLSearchParams(
+    query({
+      days,
+      event_type: document.getElementById("breakdown-event").value,
+      automated: document.getElementById("breakdown-who").value,
+      limit: 200,
+    })
+  );
+  for (const dimension of by) search.append("by", dimension);
+  const response = await fetch(`/api/v1/breakdown?${search}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`breakdown: ${response.status}`);
+  const found = await response.json();
+  const head = document.createElement("th");
+  document.getElementById("breakdown-head").replaceChildren(
+    ...found.by.map((name) => {
+      const th = head.cloneNode();
+      th.textContent = DIMENSION_NAMES[name] ?? name;
+      return th;
+    }),
+    Object.assign(head.cloneNode(), { className: "number", textContent: "Events" }),
+    Object.assign(head.cloneNode(), { className: "number", textContent: "Installations" })
+  );
+  document.getElementById("breakdown").replaceChildren(
+    ...found.groups.map((group) =>
+      row([
+        ...found.by.map((name) => cell(group[name] ?? "not said", group[name] === null ? "muted" : "")),
+        cell(group.events, "number"),
+        cell(group.clients, "number"),
+      ])
+    )
   );
 }
 
@@ -128,6 +203,10 @@ async function detail(days) {
         cell(item.artifact_id),
         cell(item.artifact_version ?? ""),
         cell(item.source),
+        cell(item.harness ?? ""),
+        cell(item.scope ?? ""),
+        cell(item.registry ?? ""),
+        cell([item.interface, item.via === "direct" ? null : item.via, item.collection].filter(Boolean).join(" ")),
         cell(item.client_id.slice(0, 8)),
         cell(item.client_version),
       ])
@@ -247,6 +326,7 @@ async function refresh() {
     })
   );
   await artifacts(days);
+  await breakdown(days);
   await detail(days);
   document.getElementById("updated").textContent = `updated ${new Date().toISOString().slice(0, 19)}Z`;
 }
@@ -257,6 +337,10 @@ function run() {
   });
 }
 
+dimensionOptions();
+for (const id of ["by-1", "by-2", "by-3", "breakdown-event", "breakdown-who"]) {
+  document.getElementById(id).addEventListener("change", run);
+}
 document.getElementById("days").addEventListener("change", run);
 document.getElementById("kind").addEventListener("change", run);
 document.getElementById("order").addEventListener("change", run);

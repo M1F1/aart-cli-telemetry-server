@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
+from enum import StrEnum
 from typing import Any
 
 from aart_cli_telemetry_server.domain.artifacts import (
     ArtifactDetail,
     ArtifactRow,
     ClientVersion,
+    Dimension,
     EventView,
+    Group,
 )
-from aart_cli_telemetry_server.domain.events import stamp
+from aart_cli_telemetry_server.domain.events import Context, stamp
 from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
     DailyCount,
@@ -203,6 +207,34 @@ def event_document(item: EventView) -> dict[str, Any]:
         "client_id": item.client_id,
         "client_version": item.client_version,
         "automated": item.automated,
+        **{
+            name: _plain(getattr(item.context, name))
+            for name in (field.name for field in fields(Context))
+        },
+        **{
+            name: None if item.environment is None else getattr(item.environment, name)
+            for name in ("os", "arch", "python")
+        },
+    }
+
+
+def _plain(value: object) -> object:
+    return value.value if isinstance(value, StrEnum) else value
+
+
+def breakdown_document(by: tuple[Dimension, ...], found: tuple[Group, ...]) -> dict[str, Any]:
+    return {
+        "by": [dimension.value for dimension in by],
+        "groups": [
+            {
+                **{
+                    dimension.value: value for dimension, value in zip(by, item.values, strict=True)
+                },
+                "events": item.events,
+                "clients": item.clients,
+            }
+            for item in found
+        ],
     }
 
 

@@ -8,9 +8,10 @@ only when the URL is SQLite's.
 
 A database this server did not create, or created at another schema version, is refused and left
 exactly as it is. A table schema version 1 gained later -- `failure`, for `aart_cli.failed`,
-`automation`, for events sent as automation, and `failure_cause`, for what a failure's exception
-was raised from -- is created in a version-1 database that does not have it yet, and nothing else
-in it changes. Servers
+`automation`, for events sent as automation, `failure_cause`, for what a failure's exception
+was raised from, and `event_context`, for where and how an event happened -- is created in a
+version-1 database that does not have it yet, as is the view `event_wide`, and nothing else in it
+changes. Servers
 starting together on one database check and create the schema one at a time, and a connection the
 database dropped -- a restart, a failover, an idle timeout -- is replaced before it is used.
 """
@@ -22,7 +23,9 @@ import os
 import sqlite3
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import fields
 from datetime import UTC, date, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -60,21 +63,31 @@ from aart_cli_telemetry_server.domain.artifacts import (
     MANAGED,
     MAX_EVENTS,
     ClientVersion,
+    Dimension,
     EventView,
+    Group,
     Holding,
     Reach,
     Selection,
     Tally,
+    check_breakdown,
+    ordered_groups,
     ordered_versions,
     tally_key,
 )
 from aart_cli_telemetry_server.domain.events import (
+    HARNESS_OF,
     Cause,
+    Context,
+    Environment,
     Event,
     EventType,
     Failure,
+    Interface,
+    Scope,
     Source,
     StoredEvent,
+    Via,
 )
 from aart_cli_telemetry_server.domain.stats import (
     ArtifactUsage,
@@ -88,9 +101,11 @@ from aart_cli_telemetry_server.domain.stats import (
 
 __all__ = [
     "DATABASE",
+    "EVENT_WIDE",
     "SCHEMA_VERSION",
     "SqlEventRepository",
     "automation",
+    "event_context",
     "failure_causes",
     "failures",
     "open_repository",
@@ -179,7 +194,55 @@ automation = Table(
     Column("event_id", String(36), ForeignKey("event.event_id"), primary_key=True),
 )
 #: Whether the event of the row at hand was sent as automation.
-_automated = exists().where(automation.c.event_id == events.c.event_id)
+# An alias, so it correlates with the event alone even where automation is joined as well.
+_marked = automation.alias("marked")
+_automated = exists().where(_marked.c.event_id == events.c.event_id)
+
+#: Where and how an event happened, and what its request was sent from (revision 7). An event
+#: that said none of it has no row.
+event_context = Table(
+    "event_context",
+    metadata,
+    Column("event_id", String(36), ForeignKey("event.event_id"), primary_key=True),
+    Column("harness", String(64), nullable=True),
+    Column("scope", String(16), nullable=True),
+    Column("registry", String(64), nullable=True),
+    Column("interface", String(16), nullable=True),
+    Column("previous_version", String(64), nullable=True),
+    Column("via", String(16), nullable=True),
+    Column("collection", String(200), nullable=True),
+    Column("collection_version", String(64), nullable=True),
+    Column("package_digest", String(71), nullable=True),
+    Column("duration_ms", Integer(), nullable=True),
+    Column("configuration_inputs", Integer(), nullable=True),
+    Column("credential_inputs", Integer(), nullable=True),
+    Column("tool", String(200), nullable=True),
+    Column("session", String(36), nullable=True),
+    Column("os", String(16), nullable=True),
+    Column("arch", String(16), nullable=True),
+    Column("python", String(32), nullable=True),
+)
+_CONTEXT = tuple(item.name for item in fields(Context))
+_ENVIRONMENT = ("os", "arch", "python")
+
+
+def _context_row(stored: StoredEvent) -> dict[str, object]:
+    context = stored.event.context
+    environment = stored.environment
+    return {
+        "event_id": stored.event_id,
+        **{name: _plain(getattr(context, name)) for name in _CONTEXT},
+        **{
+            name: None if environment is None else getattr(environment, name)
+            for name in _ENVIRONMENT
+        },
+    }
+
+
+def _plain(value: object) -> object:
+    """An enum as the string it stands for; anything else as it is."""
+
+    return value.value if isinstance(value, StrEnum) else value
 
 
 def sqlite_url(data_dir: str) -> str:
@@ -262,6 +325,11 @@ class SqlEventRepository:
             _causes_row(item) for item in stored if item.event.failure and item.event.failure.causes
         ]
         automated = {item.event_id for item in stored if item.automated}
+        situated = {
+            item.event_id: _context_row(item)
+            for item in stored
+            if item.event.context.given() or item.environment is not None
+        }
         dialect = self._engine.dialect.name
         insert = postgresql.insert if dialect == "postgresql" else sqlite.insert
 
@@ -295,6 +363,11 @@ class SqlEventRepository:
                     )
                 if marked:
                     connection.execute(automation.insert(), marked)
+                # As with automation, only what this request added: a context belongs to the
+                # request that first sent its event.
+                placed = [situated[name] for name in added if name in situated]
+                if placed:
+                    connection.execute(event_context.insert(), placed)
 
         return _guarded(write)
 
@@ -620,7 +693,11 @@ class SqlEventRepository:
                 events.c.artifact_version,
                 events.c.client_id,
                 events.c.client_version,
-                _automated,
+                _automated.label("automated"),
+                *(event_context.c[name] for name in (*_CONTEXT, *_ENVIRONMENT)),
+            )
+            .select_from(
+                events.outerjoin(event_context, event_context.c.event_id == events.c.event_id)
             )
             .where(held)
             .order_by(events.c.occurred_at.desc(), self._by_name(events.c.event_id).desc())
@@ -629,29 +706,49 @@ class SqlEventRepository:
         return self._rows(statement).map(
             lambda rows: tuple(
                 EventView(
-                    name,
-                    _aware(moment),
-                    EventType(event_type),
-                    Source(source),
-                    kind,
-                    artifact,
-                    version,
-                    client,
-                    client_version,
-                    bool(automated),
+                    row.event_id,
+                    _aware(row.occurred_at),
+                    EventType(row.event_type),
+                    Source(row.source),
+                    row.artifact_type,
+                    row.artifact_id,
+                    row.artifact_version,
+                    row.client_id,
+                    row.client_version,
+                    bool(row.automated),
+                    _context(row),
+                    _environment(row),
                 )
-                for (
-                    name,
-                    moment,
-                    event_type,
-                    source,
-                    kind,
-                    artifact,
-                    version,
-                    client,
-                    client_version,
-                    automated,
-                ) in rows
+                for row in rows
+            )
+        )
+
+    def breakdown(
+        self, selection: Selection, by: tuple[Dimension, ...], limit: int
+    ) -> IOResult[tuple[Group, ...], StorageError]:
+        check_breakdown(by, limit)
+        grouped = [_DIMENSIONS[dimension] for dimension in by]
+        statement = (
+            select(*grouped, func.count(), func.count(events.c.client_id.distinct()))
+            .select_from(
+                events.outerjoin(
+                    event_context, event_context.c.event_id == events.c.event_id
+                ).outerjoin(automation, automation.c.event_id == events.c.event_id)
+            )
+            .where(_selected(selection))
+            .group_by(*grouped)
+        )
+        return self._rows(statement).map(
+            lambda rows: ordered_groups(
+                (
+                    Group(
+                        tuple(_dimension(value) for value in row[: len(by)]),
+                        int(row[len(by)]),
+                        int(row[len(by) + 1]),
+                    )
+                    for row in rows
+                ),
+                limit,
             )
         )
 
@@ -721,6 +818,15 @@ def _selected(selection: Selection) -> Any:
         held &= events.c.client_version == selection.client_version
     if selection.automated is not None:
         held &= _automated if selection.automated else ~_automated
+    if selection.harness is not None:
+        held &= func.coalesce(_said("harness"), _SOURCE_HARNESS) == selection.harness
+    for name, value in (
+        ("scope", selection.scope),
+        ("registry", selection.registry),
+        ("interface", selection.interface),
+    ):
+        if value is not None:
+            held &= _said(name) == _plain(value)
     if selection.artifact_id is None:
         if selection.artifact_type is not None:
             held &= events.c.artifact_type == selection.artifact_type
@@ -738,6 +844,102 @@ def _selected(selection: Selection) -> Any:
             & (func.length(events.c.artifact_id) > len(prefix))
         )
     return held & own
+
+
+def _said(name: str) -> Any:
+    """What the event of the row at hand said in its context's column `name`; NULL if nothing."""
+
+    # An alias, so it correlates with the event alone even where the context is joined as well.
+    said = event_context.alias("said")
+    return select(said.c[name]).where(said.c.event_id == events.c.event_id).scalar_subquery()
+
+
+#: The harness a use's source is, for a use that names none (`domain.artifacts.harness_of`).
+_SOURCE_HARNESS = case(
+    *((events.c.source == source.value, harness) for source, harness in HARNESS_OF.items()),
+    else_=None,
+)
+#: The view of every event with all it said, one row each, for whoever analyses the database in
+#: SQL: its context and environment, whether automation sent it, and a use's harness its source's
+#: when it named none. Nothing reads it here.
+EVENT_WIDE = "event_wide"
+
+
+def _wide(dialect: Dialect) -> str:
+    """`EVENT_WIDE`'s `CREATE VIEW` in `dialect`."""
+
+    query = select(
+        *events.c,
+        case((automation.c.event_id.is_not(None), True), else_=False).label("automated"),
+        func.coalesce(event_context.c.harness, _SOURCE_HARNESS).label("harness"),
+        *(event_context.c[name] for name in (*_CONTEXT, *_ENVIRONMENT) if name != "harness"),
+    ).select_from(
+        events.outerjoin(event_context, event_context.c.event_id == events.c.event_id).outerjoin(
+            automation, automation.c.event_id == events.c.event_id
+        )
+    )
+    compiled = query.compile(dialect=dialect, compile_kwargs={"literal_binds": True})
+    return f"CREATE VIEW {EVENT_WIDE} AS {compiled}"
+
+
+_DIMENSIONS: dict[Dimension, Any] = {
+    Dimension.EVENT_TYPE: events.c.event_type,
+    Dimension.SOURCE: events.c.source,
+    Dimension.ARTIFACT_TYPE: events.c.artifact_type,
+    Dimension.ARTIFACT_ID: events.c.artifact_id,
+    Dimension.ARTIFACT_VERSION: events.c.artifact_version,
+    Dimension.CLIENT_VERSION: events.c.client_version,
+    Dimension.AUTOMATED: case((automation.c.event_id.is_not(None), "true"), else_="false"),
+    Dimension.DAY: events.c.occurred_day,
+    Dimension.HARNESS: func.coalesce(event_context.c.harness, _SOURCE_HARNESS),
+    **{
+        dimension: event_context.c[dimension.value]
+        for dimension in (
+            Dimension.SCOPE,
+            Dimension.REGISTRY,
+            Dimension.INTERFACE,
+            Dimension.VIA,
+            Dimension.COLLECTION,
+            Dimension.PREVIOUS_VERSION,
+            Dimension.TOOL,
+            Dimension.OS,
+            Dimension.ARCH,
+            Dimension.PYTHON,
+        )
+    },
+}
+
+
+def _dimension(value: object) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if isinstance(value, date) else str(value)
+
+
+def _context(row: Any) -> Context:
+    def enum(kind: Any, value: Any) -> Any:
+        return None if value is None else kind(value)
+
+    return Context(
+        harness=row.harness,
+        scope=enum(Scope, row.scope),
+        registry=row.registry,
+        interface=enum(Interface, row.interface),
+        previous_version=row.previous_version,
+        via=enum(Via, row.via),
+        collection=row.collection,
+        collection_version=row.collection_version,
+        package_digest=row.package_digest,
+        duration_ms=row.duration_ms,
+        configuration_inputs=row.configuration_inputs,
+        credential_inputs=row.credential_inputs,
+        tool=row.tool,
+        session=row.session,
+    )
+
+
+def _environment(row: Any) -> Environment | None:
+    return None if row.os is None else Environment(row.os, row.arch, row.python)
 
 
 def _count(kind: EventType) -> Any:
@@ -849,6 +1051,7 @@ def _prepare(engine: Engine) -> None:
         if not tables:
             metadata.create_all(connection)
             connection.execute(schema_info.insert(), {"id": 1, "version": SCHEMA_VERSION})
+            connection.exec_driver_sql(_wide(connection.dialect))
             return
         if "schema_info" not in tables:
             raise _Refused("this database was not created by aart-cli-telemetry-server")
@@ -857,9 +1060,11 @@ def _prepare(engine: Engine) -> None:
             raise _Refused(
                 f"this database has schema version {version}; this server reads {SCHEMA_VERSION}"
             )
-        for later in (failures, automation, failure_causes):
+        for later in (failures, automation, failure_causes, event_context):
             if later.name not in tables:
                 later.create(connection)
+        if EVENT_WIDE not in inspect(connection).get_view_names():
+            connection.exec_driver_sql(_wide(connection.dialect))
 
 
 def _one_at_a_time(connection: Connection) -> None:

@@ -9,6 +9,7 @@ that groups, filters or orders differently from the definitions fails here, not 
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import sqlite3
 import stat
@@ -27,9 +28,11 @@ from sqlalchemy import Table, create_engine, delete, inspect, select, text
 
 from aart_cli_telemetry_server.adapters.memory import InMemoryEventRepository
 from aart_cli_telemetry_server.adapters.sql import (
+    EVENT_WIDE,
     SCHEMA_VERSION,
     SqlEventRepository,
     automation,
+    event_context,
     events,
     failure_causes,
     failures,
@@ -40,7 +43,17 @@ from aart_cli_telemetry_server.adapters.sql import (
 )
 from aart_cli_telemetry_server.application.ports import EventRepository, StorageError
 from aart_cli_telemetry_server.domain import artifacts, stats
-from aart_cli_telemetry_server.domain.events import Event, EventType, Source, StoredEvent
+from aart_cli_telemetry_server.domain.events import (
+    Context,
+    Environment,
+    Event,
+    EventType,
+    Interface,
+    Scope,
+    Source,
+    StoredEvent,
+    Via,
+)
 from aart_cli_telemetry_server.effects import perform
 
 from .strategies import CLIENTS, NOW, histories, numbered, selections
@@ -61,6 +74,7 @@ def _sql(url: str) -> SqlEventRepository:
         connection.execute(delete(failure_causes))
         connection.execute(delete(failures))
         connection.execute(delete(automation))
+        connection.execute(delete(event_context))
         connection.execute(delete(events))
     return repository
 
@@ -153,13 +167,23 @@ def test_nothing_to_add_and_ping(make: Callable[[], EventRepository]) -> None:
     selection=selections(),
     limit=st.integers(1, artifacts.MAX_EVENTS),
     cursor=st.none() | st.integers(0, 39),
+    by=st.lists(
+        st.sampled_from(list(artifacts.Dimension)),
+        min_size=1,
+        max_size=artifacts.MAX_DIMENSIONS,
+        unique=True,
+    ).map(tuple),
+    groups=st.integers(1, 6),
 )
 def test_every_read_model_answer_agrees_with_the_definitions(
     make: Callable[[], EventRepository],
+    *,
     history: list[StoredEvent],
     selection: artifacts.Selection,
     limit: int,
     cursor: int | None,
+    by: tuple[artifacts.Dimension, ...],
+    groups: int,
 ) -> None:
     repository = make()
     repository.add(history)
@@ -175,6 +199,8 @@ def test_every_read_model_answer_agrees_with_the_definitions(
         lambda r: r.recent(selection, limit, before),
         lambda r: r.recent(selection, 3, None),
         lambda r: r.client_versions(selection),
+        lambda r: r.breakdown(selection, by, groups),
+        lambda r: r.breakdown(selection, by, artifacts.MAX_GROUPS),
     )
     for read in reads:
         assert _value(read(repository)) == _value(read(oracle))
@@ -249,6 +275,159 @@ def test_the_read_model_s_edges_agree_with_the_definitions(
     )
     for read in reads:
         assert _value(read(repository)) == _value(read(oracle))
+
+
+def _situated(
+    number: int,
+    kind: EventType,
+    source: Source,
+    context: Context,
+    *,
+    artifact_type: str = "mcp",
+    automated: bool = False,
+    environment: Environment | None = None,
+) -> StoredEvent:
+    return StoredEvent(
+        Event(
+            f"00000000-0000-4000-8000-{number:012d}",
+            NOW - timedelta(minutes=number),
+            kind,
+            source,
+            "github",
+            artifact_type,
+            None if kind is EventType.UNMANAGED_USED else "1.0.0",
+            context=context,
+        ),
+        CLIENTS[number % 2],
+        "0.24.0",
+        NOW,
+        automated,
+        environment,
+    )
+
+
+#: Where a context rule's edge is: a use that names no harness but has a source that is one, a
+#: lifecycle event that names none, an event with an environment and no context, and automation.
+_CONTEXTS = [
+    _situated(
+        1,
+        EventType.INSTALLED,
+        Source.AART_CLI,
+        Context(
+            harness="opencode",
+            scope=Scope.USER,
+            registry="company",
+            interface=Interface.TUI,
+            via=Via.COLLECTION,
+            collection="starter-kit",
+            package_digest="sha256:" + "ab" * 32,
+            duration_ms=1200,
+            configuration_inputs=2,
+            credential_inputs=1,
+        ),
+    ),
+    _situated(
+        2,
+        EventType.UPDATED,
+        Source.AART_CLI,
+        Context(harness="claude", scope=Scope.PROJECT, previous_version="0.9.0"),
+        automated=True,
+    ),
+    _situated(3, EventType.REMOVED, Source.AART_CLI, Context()),
+    _situated(
+        4,
+        EventType.USED,
+        Source.CLAUDE_HOOK,
+        Context(scope=Scope.USER, registry="company", tool="create_issue"),
+        environment=Environment("darwin", "arm64", "3.11.9"),
+    ),
+    _situated(5, EventType.USED, Source.OPENCODE_PLUGIN, Context(harness="opencode")),
+    _situated(
+        6,
+        EventType.UNMANAGED_USED,
+        Source.CLAUDE_HOOK,
+        Context(tool="search", session="5a1f0c2e-1b2c-4d3e-8f40-516273849a5b"),
+        environment=Environment("linux", "x86_64", "3.12.4"),
+    ),
+    _situated(
+        7,
+        EventType.INSTALLED,
+        Source.AART_CLI,
+        Context(),
+        environment=Environment("linux", "x86_64", "3.12.4"),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        artifacts.Selection(artifacts.EPOCH),
+        artifacts.Selection(artifacts.EPOCH, harness="claude"),
+        artifacts.Selection(artifacts.EPOCH, harness="opencode"),
+        artifacts.Selection(artifacts.EPOCH, scope=Scope.USER),
+        artifacts.Selection(artifacts.EPOCH, registry="company", automated=False),
+        artifacts.Selection(artifacts.EPOCH, interface=Interface.TUI),
+        artifacts.Selection(artifacts.EPOCH, automated=True),
+    ],
+)
+def test_a_context_s_edges_agree_with_the_definitions(
+    make: Callable[[], EventRepository], selection: artifacts.Selection
+) -> None:
+    repository = make()
+    repository.add(_CONTEXTS)
+    oracle = _oracle(_CONTEXTS)
+
+    reads: list[Callable[[EventRepository], IOResult[object, StorageError]]] = [
+        lambda r: r.tallies(selection),
+        lambda r: r.recent(selection, artifacts.MAX_EVENTS, None),
+    ]
+    for read in reads:
+        assert _value(read(repository)) == _value(read(oracle))
+    for dimension in artifacts.Dimension:
+        by = (dimension,)
+        assert _value(repository.breakdown(selection, by, artifacts.MAX_GROUPS)) == _value(
+            oracle.breakdown(selection, by, artifacts.MAX_GROUPS)
+        ), dimension
+    assert _value(oracle.recent(selection, artifacts.MAX_EVENTS, None)), "selects something"
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
+def test_the_wide_view_is_every_event_with_all_it_said(tmp_path: Path, backend: str) -> None:
+    url = _shared(tmp_path, backend)
+    _empty(url)
+    repository = _sql(url)
+    repository.add(_CONTEXTS)
+    every = artifacts.Selection(artifacts.EPOCH)
+    listed = _value(repository.recent(every, artifacts.MAX_EVENTS, None))
+    kept = {stored.event_id: stored for stored in _CONTEXTS}
+
+    with repository.engine.connect() as connection:
+        rows = {
+            row["event_id"]: row
+            for row in connection.execute(text("SELECT * FROM event_wide")).mappings()
+        }
+    repository.engine.dispose()
+
+    assert set(rows) == {view.event_id for view in listed}
+    for view in listed:
+        row = rows[view.event_id]
+        said = {item.name: getattr(view.context, item.name) for item in dataclasses.fields(Context)}
+        said["harness"] = artifacts.harness_of(kept[view.event_id])
+        environment = view.environment
+        assert {name: row[name] for name in said} == said
+        assert (row["os"], row["arch"], row["python"]) == (
+            (None, None, None)
+            if environment is None
+            else (environment.os, environment.arch, environment.python)
+        )
+        assert bool(row["automated"]) is view.automated
+        assert (row["event_type"], row["source"], row["artifact_id"], row["client_id"]) == (
+            view.event_type.value,
+            view.source.value,
+            view.artifact_id,
+            view.client_id,
+        )
 
 
 # -- SQLite on disk --------------------------------------------------------------------------------
@@ -365,6 +544,7 @@ def _empty(url: str) -> None:
         return
     engine = create_engine(url)
     with engine.begin() as connection:
+        connection.execute(text(f"DROP VIEW IF EXISTS {EVENT_WIDE}"))
         metadata.drop_all(connection)
     engine.dispose()
 
@@ -423,8 +603,8 @@ def test_replicas_starting_together_on_an_empty_database_all_open_it(
 
 @pytest.mark.parametrize(
     "later",
-    [failures, automation, failure_causes],
-    ids=["failure", "automation", "failure_cause"],
+    [failures, automation, failure_causes, event_context],
+    ids=["failure", "automation", "failure_cause", "event_context"],
 )
 @pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
 def test_replicas_starting_together_on_a_database_before_a_later_table_all_open_it(
@@ -436,9 +616,11 @@ def test_replicas_starting_together_on_a_database_before_a_later_table_all_open_
         _value(open_repository(url)).engine.dispose()
         engine = create_engine(url)
         with engine.begin() as connection:
+            connection.execute(text(f"DROP VIEW {EVENT_WIDE}"))
             later.drop(connection)
         assert _opened_together(url) == [True] * 4
         assert later.name in inspect(engine).get_table_names()
+        assert EVENT_WIDE in inspect(engine).get_view_names()
         engine.dispose()
 
 

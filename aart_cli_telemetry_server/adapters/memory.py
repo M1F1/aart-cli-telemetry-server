@@ -83,3 +83,11 @@ class InMemoryEventRepository:
         self, selection: artifacts.Selection
     ) -> IOResult[tuple[artifacts.ClientVersion, ...], StorageError]:
         return IOSuccess(artifacts.client_versions(self._events.values(), selection))
+
+    def breakdown(
+        self,
+        selection: artifacts.Selection,
+        by: tuple[artifacts.Dimension, ...],
+        limit: int,
+    ) -> IOResult[tuple[artifacts.Group, ...], StorageError]:
+        return IOSuccess(artifacts.breakdown(self._events.values(), selection, by, limit))

@@ -12,7 +12,12 @@ raised from (`causes`, which the dashboard shows in the place's tooltip); never 
 argument or a path. The
 server recomputes each fingerprint and refuses one that is not the failure's own. An installation
 that runs as automation, such as a CI job, says so (`automated`), and the dashboard counts people's
-installations and automated ones apart, so fresh CI jobs do not read as new people.
+installations and automated ones apart, so fresh CI jobs do not read as new people. From contract
+revision 7 an event may also say where and how it happened -- which harness, user or project
+scope, which Registry alias, TUI or CLI, the version it was updated from, whether it came in a
+Collection or a plugin, how long the action took, which tool of an MCP was called, a pseudonymous
+session -- and a request what it was sent from (OS, architecture, Python). Never a project, a
+path, a Registry address, a user or host name, or a value anyone typed.
 
 - **The contract** between aart-cli and this server is [`docs/telemetry-api-v1.md`](docs/telemetry-api-v1.md)
   with [`contract/telemetry-api-v1.examples.json`](contract/telemetry-api-v1.examples.json). Both
@@ -63,7 +68,8 @@ else `$XDG_DATA_HOME/aart-cli-telemetry-server`, else `~/.local/share/aart-cli-t
 URL can carry a password, so it is never printed. `--data-dir` overrides both with SQLite there.
 The schema is created in an empty database on first start; a database at another schema version,
 or not created by this server, is refused and left as it is. A version-1 database from before a
-table version 1 gained later -- `failure`, `automation`, `failure_cause` -- gains it on the first
+table version 1 gained later -- `failure`, `automation`, `failure_cause`, `event_context`, and the
+view `event_wide` -- gains it on the first
 start of a version that has it, and nothing else in it changes. Servers starting together on one database do this one at a time, so every
 replica of a first deployment or an upgrade starts. A connection the database dropped -- a
 restart, a failover, an idle timeout -- is replaced before it is used, so the first request after
@@ -123,6 +129,7 @@ Swagger UI's script and style come from a CDN; a network that blocks it still ha
 | `GET /api/v1/artifacts` | Every artifact installed, updated, removed or used: counts, how many installations hold it now, its latest version, and a plugin's skills' uses. `sort=installs\|uses\|holders\|recent\|name`, `q`, `artifact_type`, `limit`. |
 | `GET /api/v1/artifacts/{artifact_type}/{artifact_id}` | One artifact: its counts, versions, days, sources, and a plugin's skills. `404` when nothing selected is about it. |
 | `GET /api/v1/events` | The events kept, newest first, a page at a time: `event_type`, `artifact_type`, `artifact_id`, `members=true` for a plugin's skills too, `limit`, `before=<next_before>`. |
+| `GET /api/v1/breakdown` | The events grouped by 1 to 3 dimensions (`by=harness&by=interface`), each group with its events and installations, most events first: `event_type`, `artifact_type`, `source`, `artifact_id`, `artifact_version`, `client_version`, `automated`, `day`, `harness`, `scope`, `registry`, `interface`, `via`, `collection`, `previous_version`, `tool`, `os`, `arch`, `python`. Also `event_type`, `artifact_id`, `members`, `limit`. |
 | `GET /api/v1/client-versions` | The aart-cli versions events were sent from, and by how many installations. |
 | `GET /api/v1/stats/summary?days=30` | Uses, installs, updates, removals, people's and automated active installations, uses of tools aart-cli did not install, failures aart-cli met. |
 | `GET /api/v1/stats/top-artifacts?days=30&limit=20` | Artifacts by uses. |
@@ -132,19 +139,46 @@ Swagger UI's script and style come from a CDN; a network that blocks it still ha
 | `GET /api/v1/stats/by-source?days=30` | Uses per harness and kind. |
 | `POST /mcp` | The same reads for an agent, as a read-only MCP server (below). |
 
-Every `/api/v1/artifacts`, `/api/v1/events` and `/api/v1/client-versions` query takes the same
-selection: `days` (30) or `since`, `until`, `source`, `client_version` and `automated`. A plugin's
+Every `/api/v1/artifacts`, `/api/v1/events`, `/api/v1/breakdown` and `/api/v1/client-versions`
+query takes the same selection: `days` (30) or `since`, `until`, `source`, `client_version`,
+`automated`, `harness`, `scope`, `registry` and `interface`. A use that names no harness is its
+source's. A plugin's
 skill is the artifact `skill` named `<plugin>:<skill>`; installing the plugin installs each of them.
 
 ### MCP
 
-`/mcp` is an MCP server over Streamable HTTP that only reads: `summary`, `list_artifacts`,
-`get_artifact`, `list_events`, `client_versions`, `failures`, `unmanaged_tools` and `daily`, each
+`/mcp` is an MCP server over Streamable HTTP that only reads: `summary`, `breakdown`,
+`list_artifacts`, `get_artifact`, `list_events`, `client_versions`, `failures`, `unmanaged_tools`
+and `daily`, each
 answering what the matching endpoint does. A request from a browser page on another host is
 refused. To ask Claude Code about the server:
 
 ```bash
 claude mcp add --transport http aart-telemetry http://127.0.0.1:8765/mcp
+```
+
+### Analysis in SQL
+
+The view `event_wide` is every event with all it said, one row each: the event's own columns,
+`automated`, `harness` (a use's source's when it named none), the revision 7 context and the
+request's `os`, `arch` and `python`; what an event did not say is `NULL`. On PostgreSQL, a role
+that may read it and nothing else:
+
+```sql
+CREATE ROLE telemetry_analyst LOGIN;
+GRANT USAGE ON SCHEMA public TO telemetry_analyst;
+GRANT SELECT ON event_wide TO telemetry_analyst;
+```
+
+People's installs in the last 30 days, by harness and TUI or CLI:
+
+```sql
+SELECT harness, interface, count(*) AS installs, count(DISTINCT client_id) AS installations
+FROM event_wide
+WHERE event_type = 'artifact.installed' AND NOT automated
+  AND occurred_at >= now() - interval '30 days'
+GROUP BY harness, interface
+ORDER BY installs DESC;
 ```
 
 ## Development
