@@ -87,15 +87,16 @@ no `artifact_version`; the request's `client_version` is the version that failed
 
 | Field | Rule |
 |---|---|
-| `fingerprint` | 16 lowercase hex digits: the first 16 of the SHA-256 of the UTF-8 JSON array `[artifact_type, artifact_id, exception or "", frames without their `:line`, diagnostics]`, written without spaces. The server checks it. |
+| `fingerprint` | 16 lowercase hex digits: the first 16 of the SHA-256 of the UTF-8 JSON array `[artifact_type, artifact_id, exception or "", frames without their `:line`, diagnostics]`, written without spaces; when the failure has `causes`, the array has a sixth element, `[[exception, frames without their `:line`], ...]`, one per cause in their order. The server checks it. |
 | `exception` | Required for `crash`, optional otherwise. An exception's type name, 1–128 characters of `[A-Za-z0-9_.]` starting with a letter or `_`. |
 | `frames` | 0–30 strings `module:function:line`, innermost last: `module` `aart_cli` or a dotted name below it (`aart_cli.io.receipt_store`), at most 128 characters of `[A-Za-z0-9_.]`, `function` 1–128 characters of `[A-Za-z0-9_<>]`, `line` 1–6 digits. Only frames of aart-cli's own package. |
+| `causes` | Optional, only with `exception`. 1–5 objects, each the exception the one before it was raised from or while handling, the first being `exception`'s: its `exception`, a type name as above, and its `frames`, as above. Nothing else. |
 | `diagnostics` | 0–10 distinct diagnostic codes, each 1–64 characters of `[a-z0-9.-]` starting with a letter or digit. |
 | `exit_code` | Optional. An integer 0–255. |
 | `python` | Python's version, 1–32 characters of `[0-9A-Za-z.+-]`. |
 | `platform` | `darwin`, `linux` or `other`. |
 
-All of them but `exception` and `exit_code` are required, and no other field is accepted. A
+All of them but `exception`, `causes` and `exit_code` are required, and no other field is accepted. A
 failure never carries an exception's message, an argument, a path, a project, an environment
 variable, an input's value or a credential.
 
@@ -136,4 +137,6 @@ was added this way, and `aart_cli.failed` with the `failure` field only it carri
 field of the request is added to version 1 when a client sends it only where it matters: a server
 that does not know it refuses just those requests, and the client marks their events rejected. `automated` was
 added this way: an older server loses only what automation sends, and a person's requests are
-unchanged.
+unchanged. An optional field of a `failure` is added the same way, sent only where it holds
+something: `causes` was, and an older server refuses only the failures that have causes (`422`),
+while every other event of the request is stored.

@@ -10,6 +10,7 @@ from hypothesis import strategies as st
 
 from aart_cli_telemetry_server.domain.events import (
     SOURCES_FOR,
+    Cause,
     Event,
     EventType,
     Failure,
@@ -64,6 +65,21 @@ def failed(
         )
     frames = tuple(f"{frame}:{draw(st.integers(0, 999999))}" for frame in shape)
     diagnostics = codes
+    causes: tuple[Cause, ...] = ()
+    if exception is not None and recurring and draw(st.booleans()):
+        line = draw(st.integers(0, 999999))
+        causes = (Cause("OSError", (f"{_FRAMES[2]}:{line}",)),)
+    elif exception is not None and not recurring:
+        causes = tuple(
+            Cause(
+                draw(named),
+                tuple(
+                    f"{frame}:{draw(st.integers(0, 999999))}"
+                    for frame in draw(st.lists(st.sampled_from(_FRAMES), max_size=2))
+                ),
+            )
+            for _ in range(draw(st.integers(0, 2)))
+        )
     return Event(
         event_id=draw(ids),
         occurred_at=draw(moments),
@@ -73,13 +89,14 @@ def failed(
         artifact_type=kind,
         artifact_version=None,
         failure=Failure(
-            fingerprint=fingerprint(kind, place, exception, frames, diagnostics),
+            fingerprint=fingerprint(kind, place, exception, frames, diagnostics, causes=causes),
             exception=exception,
             frames=frames,
             diagnostics=diagnostics,
             exit_code=draw(st.none() | st.integers(0, 255)),
             python=draw(st.sampled_from(("3.11.9", "3.12.4", "3.13.0rc1+"))),
             platform=draw(st.sampled_from(("darwin", "linux", "other"))),
+            causes=causes,
         ),
     )
 
@@ -169,6 +186,10 @@ def failure_document(failure: Failure) -> dict[str, Any]:
     if failure.exception is not None:
         document["exception"] = failure.exception
     document["frames"] = list(failure.frames)
+    if failure.causes:
+        document["causes"] = [
+            {"exception": cause.exception, "frames": list(cause.frames)} for cause in failure.causes
+        ]
     document["diagnostics"] = list(failure.diagnostics)
     if failure.exit_code is not None:
         document["exit_code"] = failure.exit_code

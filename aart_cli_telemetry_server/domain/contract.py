@@ -32,6 +32,7 @@ from .events import (
     FAILURE_KINDS,
     SOURCES_FOR,
     Batch,
+    Cause,
     Event,
     EventType,
     Source,
@@ -61,6 +62,7 @@ _UUID_PATTERN = re.compile(_UUID)
 _PLACE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
 _MODULE_MAX = 128
 MAX_FRAMES = 30
+MAX_CAUSES = 5
 MAX_DIAGNOSTICS = 10
 
 
@@ -94,16 +96,28 @@ Frame = Annotated[
     AfterValidator(_a_frame_of_aart_cli),
 ]
 Code = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9.-]{0,63}$")]
+ExceptionName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")]
+
+
+class _CauseDocument(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    exception: ExceptionName
+    frames: Annotated[list[Frame], Field(max_length=MAX_FRAMES)]
+
+    def cause(self) -> Cause:
+        return Cause(self.exception, tuple(self.frames))
 
 
 class _FailureDocument(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
     fingerprint: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{16}$")]
-    exception: (
-        Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")] | None
-    ) = None
+    exception: ExceptionName | None = None
     frames: Annotated[list[Frame], Field(max_length=MAX_FRAMES)]
+    causes: Annotated[list[_CauseDocument], Field(min_length=1, max_length=MAX_CAUSES)] | None = (
+        None
+    )
     diagnostics: Annotated[list[Code], Field(max_length=MAX_DIAGNOSTICS)]
     exit_code: Annotated[int, Field(strict=True, ge=0, le=255)] | None = None
     python: Annotated[str, StringConstraints(pattern=r"^[0-9A-Za-z.+-]{1,32}$")]
@@ -113,7 +127,12 @@ class _FailureDocument(BaseModel):
     def _codes_are_distinct(self) -> Self:
         if len(set(self.diagnostics)) != len(self.diagnostics):
             raise PydanticCustomError("failure_codes", "diagnostics are distinct")
+        if self.causes is not None and self.exception is None:
+            raise PydanticCustomError("failure_causes", "causes are an exception's")
         return self
+
+    def _causes(self) -> tuple[Cause, ...]:
+        return tuple(cause.cause() for cause in self.causes or ())
 
     def failure(self) -> FailureReport:
         return FailureReport(
@@ -124,6 +143,7 @@ class _FailureDocument(BaseModel):
             self.exit_code,
             self.python,
             self.platform,
+            self._causes(),
         )
 
 
@@ -179,6 +199,7 @@ class _EventDocument(BaseModel):
             failure.exception,
             failure.frames,
             failure.diagnostics,
+            causes=failure._causes(),
         )
         if failure.fingerprint != expected:
             raise PydanticCustomError("failure_fingerprint", "the fingerprint is not the failure's")

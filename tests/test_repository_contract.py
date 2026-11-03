@@ -30,6 +30,7 @@ from aart_cli_telemetry_server.adapters.sql import (
     SqlEventRepository,
     automation,
     events,
+    failure_causes,
     failures,
     metadata,
     open_repository,
@@ -56,6 +57,7 @@ def _value(result: IOResult[_T, StorageError]) -> _T:
 def _sql(url: str) -> SqlEventRepository:
     repository = _value(open_repository(url))
     with repository.engine.begin() as connection:
+        connection.execute(delete(failure_causes))
         connection.execute(delete(failures))
         connection.execute(delete(automation))
         connection.execute(delete(events))
@@ -312,7 +314,11 @@ def test_replicas_starting_together_on_an_empty_database_all_open_it(
         engine.dispose()
 
 
-@pytest.mark.parametrize("later", [failures, automation], ids=["failure", "automation"])
+@pytest.mark.parametrize(
+    "later",
+    [failures, automation, failure_causes],
+    ids=["failure", "automation", "failure_cause"],
+)
 @pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
 def test_replicas_starting_together_on_a_database_before_a_later_table_all_open_it(
     tmp_path: Path, backend: str, later: Table

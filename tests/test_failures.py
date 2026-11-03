@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Iterator
@@ -26,6 +27,7 @@ from aart_cli_telemetry_server.adapters.sql import (
 from aart_cli_telemetry_server.domain import stats
 from aart_cli_telemetry_server.domain.contract import Refusal, read_batch
 from aart_cli_telemetry_server.domain.events import (
+    Cause,
     Event,
     EventType,
     Source,
@@ -40,12 +42,18 @@ from .strategies import CLIENTS, NOW, failed, request
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = json.loads((ROOT / "contract" / "telemetry-api-v1.examples.json").read_text("utf-8"))
 FAILED = next(example["request"] for example in EXAMPLES["valid"] if "failure" in example["name"])
+CAUSED = next(example["request"] for example in EXAMPLES["valid"] if "causes" in example["name"])
 WEEK = stats.window(7, NOW)
 
 
 def _crash() -> dict[str, Any]:
     document: dict[str, Any] = copy.deepcopy(FAILED)
     document["events"] = document["events"][:1]
+    return document
+
+
+def _caused() -> dict[str, Any]:
+    document: dict[str, Any] = copy.deepcopy(CAUSED)
     return document
 
 
@@ -67,6 +75,9 @@ def _refit(event: dict[str, Any]) -> None:
         failure.get("exception"),
         failure["frames"],
         failure["diagnostics"],
+        causes=tuple(
+            Cause(cause["exception"], tuple(cause["frames"])) for cause in failure.get("causes", ())
+        ),
     )
 
 
@@ -103,6 +114,11 @@ def test_the_fingerprints_aart_cli_computed_are_the_ones_this_server_computes() 
             "a crash without its exception",
             "an aart_cli.failed event is a crash, error or interruption at a place, with no "
             "artifact_version, and a crash names its exception",
+        ),
+        ("a cause that carries a message", "a field the contract does not have"),
+        (
+            "causes without the exception they caused",
+            "failure must be the contract's failure object",
         ),
         ("a use that carries a failure", "only an aart_cli.failed event has a failure"),
         ("a failure from a harness hook", "this source cannot report this event_type"),
@@ -145,6 +161,105 @@ def test_a_line_or_an_exit_code_is_not_part_of_the_defect(line: int, exit_code: 
     (event,) = read_batch(json.dumps(document).encode()).unwrap().events
     assert event.failure is not None
     assert event.failure.fingerprint == FAILED["events"][0]["failure"]["fingerprint"]
+
+
+def test_a_crash_keeps_the_exceptions_it_was_raised_from_in_order() -> None:
+    (event,) = read_batch(json.dumps(CAUSED).encode()).unwrap().events
+    (sent,) = CAUSED["events"]
+    assert event.failure is not None
+    assert event.failure.causes == (
+        Cause(
+            "aart_cli.io.receipt_store.ReceiptUnwritable",
+            ("aart_cli.io.receipt_store:record:301",),
+        ),
+        Cause("PermissionError", ("aart_cli.io.receipt_store:_write:412",)),
+    )
+    assert event.failure.fingerprint == sent["failure"]["fingerprint"]
+
+
+def test_a_failure_without_causes_keeps_the_fingerprint_it_had_before_causes() -> None:
+    (crash, *_) = read_batch(json.dumps(FAILED).encode()).unwrap().events
+    assert crash.failure is not None
+    assert crash.failure.causes == ()
+    body = json.dumps(
+        [
+            "crash",
+            "consume.update",
+            "KeyError",
+            [f.rsplit(":", 1)[0] for f in crash.failure.frames],
+            [],
+        ],
+        separators=(",", ":"),
+    )
+    assert crash.failure.fingerprint == hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
+_CAUSE_CHANGES: tuple[Callable[[dict[str, Any]], object], ...] = (
+    lambda f: f["causes"][0].update(exception="ValueError"),
+    lambda f: f["causes"][1]["frames"].pop(),
+    lambda f: f["causes"][0]["frames"].__setitem__(0, "aart_cli.io.receipt_store:keep:301"),
+    lambda f: f["causes"].reverse(),
+    lambda f: f["causes"].pop(),
+    lambda f: f["causes"].append({"exception": "OSError", "frames": []}),
+    lambda f: f.pop("causes"),
+)
+
+
+@pytest.mark.parametrize("change", _CAUSE_CHANGES)
+def test_what_a_crash_was_raised_from_is_part_of_the_defect(
+    change: Callable[[dict[str, Any]], object],
+) -> None:
+    unchanged, document = _caused(), _caused()
+    _refit(unchanged["events"][0])
+    change(document["events"][0]["failure"])
+    assert _reasons(document) == ["the failure's fingerprint is not its own"]
+    _refit(document["events"][0])
+    assert isinstance(read_batch(json.dumps(document).encode()), Success)
+    assert (
+        document["events"][0]["failure"]["fingerprint"]
+        != unchanged["events"][0]["failure"]["fingerprint"]
+    )
+
+
+@given(line=st.integers(0, 999999))
+def test_a_cause_s_line_is_not_part_of_the_defect(line: int) -> None:
+    document = _caused()
+    frames = document["events"][0]["failure"]["causes"][1]["frames"]
+    frames[0] = frames[0].rsplit(":", 1)[0] + f":{line}"
+    assert isinstance(read_batch(json.dumps(document).encode()), Success)
+
+
+_INVALID_CAUSES: tuple[Callable[[dict[str, Any]], object], ...] = (
+    lambda f: f.update(causes=[]),
+    lambda f: f.update(causes=[{"exception": "OSError", "frames": []}] * 6),
+    lambda f: f.update(causes={"exception": "OSError", "frames": []}),
+    lambda f: f["causes"][0].update(exception="OSError: [Errno 13]"),
+    lambda f: f["causes"][0].pop("exception"),
+    lambda f: f["causes"][0].update(exception=None),
+    lambda f: f["causes"][0].pop("frames"),
+    lambda f: f["causes"][0].update(frames=["aart_cli.cli:main:1"] * 31),
+    lambda f: f["causes"][0].update(frames=["pathlib:open:1"]),
+    lambda f: f["causes"][0].update(frames=["aart_cli.cli:main"]),
+    lambda f: f["causes"].__setitem__(0, "OSError"),
+)
+
+
+@pytest.mark.parametrize("change", _INVALID_CAUSES)
+def test_a_cause_holds_only_an_exception_s_type_and_aart_cli_s_frames(
+    change: Callable[[dict[str, Any]], object],
+) -> None:
+    document = _caused()
+    failure = document["events"][0]["failure"]
+    change(failure)
+    causes = failure["causes"]
+    if isinstance(causes, list) and all(
+        isinstance(c, dict)
+        and isinstance(c.get("exception"), str)
+        and isinstance(c.get("frames"), list)
+        for c in causes
+    ):
+        _refit(document["events"][0])
+    assert _reasons(document) == ["failure must be the contract's failure object"]
 
 
 _INVALID_FAILURES: tuple[Callable[[dict[str, Any]], object], ...] = (
@@ -292,12 +407,31 @@ def test_failures_group_by_defect_and_say_it_as_its_latest_occurrence_does() -> 
         NOW - timedelta(minutes=5),
     )
     assert found[1].diagnostics == ("registry-unreachable",)
+    assert first.causes == ()
     assert stats.top_failures(history, WEEK, 1) == found[:1]
     with pytest.raises(ValueError, match="1 to"):
         stats.top_failures(history, WEEK, 0)
 
     summary = stats.summarise(history, WEEK)
     assert (summary.failures, summary.uses, summary.installs) == (6, 0, 0)
+
+
+def test_a_defect_says_what_its_latest_occurrence_was_raised_from() -> None:
+    (caused,) = read_batch(json.dumps(CAUSED).encode()).unwrap().events
+    assert caused.failure is not None
+    older = _occurrence(caused, line=1, minutes_ago=9, number=1)
+    newer = _occurrence(caused, line=1, minutes_ago=2, number=2)
+    assert newer.event.failure is not None
+    moved = tuple(
+        replace(cause, frames=tuple(f.rsplit(":", 1)[0] + ":7" for f in cause.frames))
+        for cause in caused.failure.causes
+    )
+    newer = replace(
+        newer, event=replace(newer.event, failure=replace(newer.event.failure, causes=moved))
+    )
+    (found,) = stats.top_failures([older, newer], WEEK, 5)
+    assert found.causes == moved
+    assert found.causes[1].frames == ("aart_cli.io.receipt_store:_write:7",)
 
 
 def test_as_often_the_latest_comes_first_then_the_fingerprint() -> None:
@@ -408,6 +542,7 @@ def test_the_failures_endpoint_says_each_defect_and_nothing_else(
         "place": "consume.update",
         "exception": "KeyError",
         "frames": FAILED["events"][0]["failure"]["frames"],
+        "causes": [],
         "diagnostics": [],
         "occurrences": 1,
         "clients": 1,
@@ -419,3 +554,14 @@ def test_the_failures_endpoint_says_each_defect_and_nothing_else(
     assert [item["kind"] for item in found["failures"]].count("crash") == 1
     for bad in ("limit=0", f"limit={stats.MAX_TOP + 1}", "days=0"):
         assert client.get(f"/api/v1/stats/failures?{bad}").status_code == 422
+
+
+def test_the_failures_endpoint_says_what_a_crash_was_raised_from(
+    on_disk: SqlEventRepository,
+) -> None:
+    client = TestClient(create_app(on_disk, clock=lambda: NOW))
+    document = copy.deepcopy(CAUSED)
+    document["events"][0]["occurred_at"] = "2026-10-29T17:00:00Z"
+    assert client.post("/api/v1/events/batch", json=document).status_code == 200
+    (found,) = client.get("/api/v1/stats/failures?days=7").json()["failures"]
+    assert found["causes"] == CAUSED["events"][0]["failure"]["causes"]

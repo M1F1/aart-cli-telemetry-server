@@ -172,6 +172,49 @@
           }
         ]
       }
+    },
+    {
+      "name": "a crash raised while handling other exceptions, with its causes",
+      "request": {
+        "schema_version": 1,
+        "client_id": "0b6f4d1e-8f8a-4a43-9a52-2f0f5d0f6a11",
+        "client_version": "0.25.0",
+        "events": [
+          {
+            "event_id": "4d0c8a43-6a49-4c1f-8f5c-0b2d0bfa0009",
+            "occurred_at": "2026-11-03T09:00:00Z",
+            "event_type": "aart_cli.failed",
+            "source": "aart_cli",
+            "artifact_id": "consume.install",
+            "artifact_type": "crash",
+            "failure": {
+              "fingerprint": "cea7201abfa0983a",
+              "exception": "RuntimeError",
+              "frames": [
+                "aart_cli.cli:main:362",
+                "aart_cli.application.installation_action:install:214"
+              ],
+              "causes": [
+                {
+                  "exception": "aart_cli.io.receipt_store.ReceiptUnwritable",
+                  "frames": [
+                    "aart_cli.io.receipt_store:record:301"
+                  ]
+                },
+                {
+                  "exception": "PermissionError",
+                  "frames": [
+                    "aart_cli.io.receipt_store:_write:412"
+                  ]
+                }
+              ],
+              "diagnostics": [],
+              "python": "3.12.4",
+              "platform": "linux"
+            }
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -365,6 +408,72 @@
           "python": "3.11.9",
           "platform": "darwin",
           "message": "no such file /Users/someone/project"
+        }
+      }
+    },
+    {
+      "name": "a cause that carries a message",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000017",
+        "occurred_at": "2026-11-03T09:00:00Z",
+        "event_type": "aart_cli.failed",
+        "source": "aart_cli",
+        "artifact_id": "consume.install",
+        "artifact_type": "crash",
+        "failure": {
+          "fingerprint": "cea7201abfa0983a",
+          "exception": "RuntimeError",
+          "frames": [
+            "aart_cli.cli:main:362",
+            "aart_cli.application.installation_action:install:214"
+          ],
+          "causes": [
+            {
+              "exception": "aart_cli.io.receipt_store.ReceiptUnwritable",
+              "frames": [
+                "aart_cli.io.receipt_store:record:301"
+              ]
+            },
+            {
+              "exception": "PermissionError",
+              "frames": [
+                "aart_cli.io.receipt_store:_write:412"
+              ],
+              "message": "[Errno 13] Permission denied: '/Users/someone/.aart-cli'"
+            }
+          ],
+          "diagnostics": [],
+          "python": "3.12.4",
+          "platform": "linux"
+        }
+      }
+    },
+    {
+      "name": "causes without the exception they caused",
+      "rejected_index": 0,
+      "event": {
+        "event_id": "9a9a9a9a-0000-4000-8000-000000000018",
+        "occurred_at": "2026-11-03T09:00:00Z",
+        "event_type": "aart_cli.failed",
+        "source": "aart_cli",
+        "artifact_id": "consume.install",
+        "artifact_type": "error",
+        "failure": {
+          "fingerprint": "4441c9fe9b5f6faa",
+          "frames": [],
+          "causes": [
+            {
+              "exception": "OSError",
+              "frames": []
+            }
+          ],
+          "diagnostics": [
+            "registry-unreachable"
+          ],
+          "exit_code": 3,
+          "python": "3.12.4",
+          "platform": "linux"
         }
       }
     },

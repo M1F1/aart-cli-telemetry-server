@@ -13,6 +13,7 @@ __all__ = [
     "FAILURE_KINDS",
     "SOURCES_FOR",
     "Batch",
+    "Cause",
     "Event",
     "EventType",
     "Failure",
@@ -56,23 +57,42 @@ SOURCES_FOR: Mapping[EventType, frozenset[Source]] = {
 FAILURE_KINDS = frozenset({"crash", "error", "interrupted"})
 
 
+@dataclass(frozen=True, slots=True)
+class Cause:
+    """An exception a failure's exception was raised from, or while handling: its type name and
+    its frames inside aart-cli, innermost last."""
+
+    exception: str
+    frames: tuple[str, ...]
+
+
+def _lines_dropped(frames: Sequence[str]) -> list[str]:
+    return [frame.rsplit(":", 1)[0] for frame in frames]
+
+
 def fingerprint(
-    kind: str, place: str, exception: str | None, frames: Sequence[str], diagnostics: Sequence[str]
+    kind: str,
+    place: str,
+    exception: str | None,
+    frames: Sequence[str],
+    diagnostics: Sequence[str],
+    *,
+    causes: Sequence[Cause] = (),
 ) -> str:
     """What names a defect: the first 16 hex digits of the SHA-256 of the compact JSON array
-    `[kind, place, exception or "", frames without their line, diagnostics]`."""
+    `[kind, place, exception or "", frames without their line, diagnostics]`, followed, when the
+    exception has causes, by `[[exception, frames without their line], ...]` in their order."""
 
-    body = json.dumps(
-        [
-            kind,
-            place,
-            exception or "",
-            [frame.rsplit(":", 1)[0] for frame in frames],
-            list(diagnostics),
-        ],
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+    body: list[object] = [
+        kind,
+        place,
+        exception or "",
+        _lines_dropped(frames),
+        list(diagnostics),
+    ]
+    if causes:
+        body.append([[cause.exception, _lines_dropped(cause.frames)] for cause in causes])
+    return hashlib.sha256(json.dumps(body, separators=(",", ":")).encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +106,7 @@ class Failure:
     exit_code: int | None
     python: str
     platform: str
+    causes: tuple[Cause, ...] = ()
 
 
 def _utc(moment: datetime) -> None:

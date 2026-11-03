@@ -6,10 +6,11 @@ telemetry on in a throwaway `AART_CLI_HOME`, puts lifecycle events in aart-cli's
 a completed install does, sends them with `aart-cli consume telemetry sync`, sends them again, and
 reads them back from this server's database once each. A second test keeps a use of an MCP no
 artifact answers to, sends it as `unmanaged.used`, and after `consume telemetry unmanaged off` sends
-the next one no more. A third has aart-cli fail -- a command that ends in an error, and a crash in
-its own code -- sends both as `aart_cli.failed`, and after `consume telemetry errors off` sends the
-next one no more. Nothing touches the real home: HOME and AART_CLI_HOME are temporary
-directories; PYTHONPATH is passed on, so it can name an aart-cli checkout. Each test runs on SQLite,
+the next one no more. A third has aart-cli fail -- a command that ends in an error, and a crash
+raised from one in its own code, which arrives with that cause -- sends both as `aart_cli.failed`,
+and after `consume telemetry errors off` sends the next one no more. Nothing touches the real
+home: HOME and AART_CLI_HOME are temporary directories; PYTHONPATH is passed on, so it can name an
+aart-cli checkout. Each test runs on SQLite,
 and on PostgreSQL too when `AART_CLI_TELEMETRY_TEST_POSTGRES_URL` names a database it may empty.
 """
 
@@ -84,7 +85,10 @@ from aart_cli.domain.telemetry import contract_moment
 from aart_cli.io.failure_journal import record_failure
 
 try:
-    contract_moment("not a moment")
+    try:
+        contract_moment("not a moment")
+    except Exception as inner:
+        raise LookupError("wrapped by this script") from inner
 except Exception as error:
     print(record_failure(sys.argv[1], FailureKind.CRASH, "e2e.crash", error=error, sync=False))
 """
@@ -239,9 +243,12 @@ def test_a_failure_aart_cli_met_is_sent_until_the_person_turns_it_off(
     assert set(found) == {"consume.report", "e2e.crash"}
     assert (found["consume.report"].kind, found["consume.report"].exception) == ("error", None)
     crash = found["e2e.crash"]
-    assert (crash.kind, crash.exception, crash.occurrences) == ("crash", "AttributeError", 1)
-    assert crash.frames
-    assert all(frame.startswith("aart_cli.") for frame in crash.frames)
+    assert (crash.kind, crash.exception, crash.occurrences) == ("crash", "LookupError", 1)
+    assert crash.frames == ()
+    (cause,) = crash.causes
+    assert cause.exception == "AttributeError"
+    assert cause.frames
+    assert all(frame.startswith("aart_cli.") for frame in cause.frames)
 
     assert _telemetry(environment, "errors", "off")["ok"] is True
     assert _run(environment, "-c", _CRASH, str(home)).stdout == b"True\n"
