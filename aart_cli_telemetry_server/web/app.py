@@ -38,6 +38,7 @@ __all__ = ["create_app"]
 _STATIC = resources.files("aart_cli_telemetry_server.web") / "static"
 _STATIC_FILES = {
     "dashboard.js": "text/javascript",
+    "activity.js": "text/javascript",
     "dashboard.css": "text/css",
     "chart.umd.min.js": "text/javascript",
 }

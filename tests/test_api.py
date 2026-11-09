@@ -212,10 +212,23 @@ def test_health_and_dashboard(client: TestClient) -> None:
     assert page.status_code == 200
     assert "script-src 'self'" in page.headers["content-security-policy"]
     assert "https://" not in page.text
-    for name in ("dashboard.js", "dashboard.css", "chart.umd.min.js"):
+    for name in ("dashboard.js", "activity.js", "dashboard.css", "chart.umd.min.js"):
         assert client.get(f"/static/{name}").status_code == 200
     assert client.get("/static/..%2Fapp.py").status_code == 404
     assert client.get("/static/chart.js.LICENSE.md").status_code == 404
+
+
+def test_the_dashboard_serves_everything_its_page_loads_and_has_its_three_tabs(
+    client: TestClient,
+) -> None:
+    page = client.get("/dashboard").text
+    loaded = re.findall(r'(?:src|href)="(/static/[^"]+)"', page)
+
+    assert {"/static/dashboard.js", "/static/activity.js", "/static/dashboard.css"} <= set(loaded)
+    assert all(client.get(path).status_code == 200 for path in loaded)
+    for view in ("log", "summary", "explore"):
+        assert f'id="tab-{view}"' in page
+        assert f'id="view-{view}"' in page
 
 
 def test_the_dashboard_offers_every_breakdown_dimension_and_no_other(client: TestClient) -> None:

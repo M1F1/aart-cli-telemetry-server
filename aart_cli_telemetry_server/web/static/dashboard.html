@@ -7,21 +7,99 @@
 <link rel="stylesheet" href="/static/dashboard.css">
 <script src="/static/chart.umd.min.js" defer></script>
 <script src="/static/dashboard.js" defer></script>
+<script src="/static/activity.js" defer></script>
 </head>
 <body>
 <header>
   <h1>Artifact telemetry</h1>
-  <label>Period
-    <select id="days">
-      <option value="7">7 days</option>
-      <option value="30" selected>30 days</option>
-      <option value="90">90 days</option>
-      <option value="365">365 days</option>
-    </select>
-  </label>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <a role="tab" href="#log" id="tab-log" aria-controls="view-log">Activity log</a>
+    <a role="tab" href="#summary" id="tab-summary" aria-controls="view-summary">Summary</a>
+    <a role="tab" href="#explore" id="tab-explore" aria-controls="view-explore">Explore</a>
+  </nav>
   <span id="updated" class="muted"></span>
 </header>
-<main>
+
+<main id="view-log" role="tabpanel" aria-labelledby="tab-log" hidden>
+  <section class="panel">
+    <div class="toolbar">
+      <label>Show
+        <select id="log-event">
+          <option value="">every event</option>
+          <option value="artifact.installed">installs</option>
+          <option value="artifact.updated">updates</option>
+          <option value="artifact.removed">removals</option>
+          <option value="artifact.used">uses</option>
+          <option value="unmanaged.used">uses of tools aart-cli did not install</option>
+          <option value="aart_cli.failed">errors</option>
+        </select>
+      </label>
+      <label>From
+        <select id="log-who">
+          <option value="">people and automation</option>
+          <option value="false">people</option>
+          <option value="true">automation (CI)</option>
+        </select>
+      </label>
+      <label>Artifact
+        <input id="log-artifact" type="search" placeholder="exact name, e.g. superpowers" maxlength="200">
+      </label>
+    </div>
+    <p class="muted">Every event the server keeps, newest first, in your local time. A user is an aart-cli installation: a pseudonymous id, not a person's name.</p>
+    <div id="log"></div>
+    <p class="muted" id="log-empty" hidden>No event matches.</p>
+    <button type="button" id="log-more" hidden>Show older events</button>
+  </section>
+</main>
+
+<main id="view-summary" role="tabpanel" aria-labelledby="tab-summary" hidden>
+  <section class="toolbar">
+    <div class="segmented" role="group" aria-label="Period" id="summary-period">
+      <button type="button" data-period="today">Today</button>
+      <button type="button" data-period="7">7 days</button>
+      <button type="button" data-period="30">30 days</button>
+      <button type="button" data-period="90">90 days</button>
+      <button type="button" data-period="365">365 days</button>
+    </div>
+    <span class="muted" id="summary-range"></span>
+  </section>
+  <section class="tiles" id="summary-tiles"></section>
+  <p class="muted">People's installations only. Automation, such as CI jobs, is counted apart in its own tile.</p>
+  <section class="panel" id="summary-chart-panel">
+    <h2>Active users per day</h2>
+    <p class="muted">Installations that sent anything that day, and their artifact uses. Days are UTC.</p>
+    <div class="chart"><canvas id="summary-daily"></canvas></div>
+  </section>
+  <section class="panel">
+    <h2>Users</h2>
+    <p class="muted" id="users-note">Each installation that did something in the period, most recently active first. Choose a row for what it did.</p>
+    <table>
+      <thead><tr><th>User</th><th>Last active</th><th class="number">Days active</th><th class="number">Uses</th><th class="number">Installs</th><th class="number">Updates</th><th class="number">Removals</th><th class="number">Artifacts</th><th>Most used</th><th>aart-cli</th></tr></thead>
+      <tbody id="users"></tbody>
+    </table>
+    <p class="muted" id="users-empty" hidden>No one did anything in this period.</p>
+  </section>
+  <section class="panel">
+    <h2>Most used artifacts</h2>
+    <table>
+      <thead><tr><th>Artifact</th><th>Kind</th><th class="number">Uses</th><th class="number">Users using it</th><th class="number">Installs</th><th class="number">Holding it now</th></tr></thead>
+      <tbody id="summary-artifacts"></tbody>
+    </table>
+    <p class="muted" id="summary-artifacts-empty" hidden>No artifact was used or installed in this period.</p>
+  </section>
+</main>
+
+<main id="view-explore" role="tabpanel" aria-labelledby="tab-explore" hidden>
+  <section class="toolbar">
+    <label>Period
+      <select id="days">
+        <option value="7">7 days</option>
+        <option value="30" selected>30 days</option>
+        <option value="90">90 days</option>
+        <option value="365">365 days</option>
+      </select>
+    </label>
+  </section>
   <section class="tiles" id="tiles"></section>
   <section class="panel">
     <h2>Uses per day</h2>

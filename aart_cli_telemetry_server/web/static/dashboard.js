@@ -349,5 +349,5 @@ document.getElementById("search").addEventListener("input", () => {
   clearTimeout(typing);
   typing = setTimeout(run, 250);
 });
-run();
-setInterval(run, 60000);
+// The Explore tab. activity.js shows the tabs and refreshes the one that is open.
+window.explore = { refresh: run };

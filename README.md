@@ -28,7 +28,11 @@ path, a Registry address, a user or host name, or a value anyone typed.
   committed; an `event_id` already stored is acknowledged and never counted again. The default is
   one SQLite database in WAL mode, owner-only (0600); `AART_CLI_TELEMETRY_DATABASE_URL` selects any
   database SQLAlchemy reads, and the same repository runs on PostgreSQL.
-- **The dashboard** loads nothing from outside the server. Chart.js 4.4.1 (MIT) is vendored in
+- **The dashboard** has three tabs: the *Activity log*, every event newest first and grouped by
+  day in the viewer's time; the *Summary* of a period -- active users, uses, installs, updates,
+  removals and errors, active users per day, each installation and what it did, and the most used
+  artifacts; and *Explore*, every aggregate and breakdown. It reads only the API below and loads
+  nothing from outside the server. Chart.js 4.4.1 (MIT) is vendored in
   `aart_cli_telemetry_server/web/static/`, with its licence beside it.
 
 ## How it is built
